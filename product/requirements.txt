@@ -1,0 +1,23 @@
+# Product backend (identity, organizations, tokens). Deliberately a separate
+# requirements file from the AI service: this process has no Azure SDK, no
+# Chroma, and no BM25 index, and pinning them together would make one
+# service's upgrade the other service's problem.
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+sqlalchemy==2.0.45
+alembic==1.18.2
+psycopg[binary]==3.3.3
+pydantic-settings==2.14.2
+PyJWT[crypto]==2.13.0
+
+# Password hashing. Argon2id is the current OWASP recommendation and the
+# library ships sane defaults; bcrypt's 72-byte silent truncation is a
+# footgun this avoids.
+argon2-cffi==25.1.0
+
+# Outbound call to the AI service for erasure.
+httpx==0.28.1
+
+# EmailStr in api/schemas.py needs this; pydantic does not bundle it.
+email-validator==2.3.0

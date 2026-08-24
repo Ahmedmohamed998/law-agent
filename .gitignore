@@ -1,0 +1,52 @@
+# --- secrets: never commit ---
+.env
+.env.*
+!.env.example
+
+# --- python ---
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# --- source PDFs: ~311MB, not needed to run the app ---
+# The committed Markdown in data/markdown/ is the OCR output of these, and the
+# Chroma index is already built, so the app runs without them. Keep them out of
+# git history rather than paying to clone 311MB of scanned decisions.
+data/raw/
+# ...except the three core labour-law sources, which are already in history
+# (so excluding them now would not shrink a clone) and are small.
+!data/raw/labor-law.pdf
+!data/raw/dlyl-astfsarat-t-dylat-nzam-al-ml-als-wdy-2025.pdf
+!data/raw/اللائحة التنفيذية لنظام العمل وملحقاتها-1.pdf
+
+# --- local noise ---
+*.log
+*.log.err
+*.err
+.DS_Store
+
+# Raw session transcripts: design records, not documentation. docs/API.md is
+# the thing meant to be read.
+docs/sessions/
+
+# local Claude Code settings
+.claude/settings.local.json
+
+# --- product backend secrets ---
+# Private signing keys. The whole trust boundary is that these never leave the
+# machine that issues tokens.
+product/keys/
+product/.env
+
+# --- node backend ---
+backend/node_modules/
+backend/dist/
+backend/.env
+# Private signing keys, same rule as the Python service.
+backend/keys/
+backend/generated/
+backend/*.tsbuildinfo
+
+# --- large files ---
+data/chroma/

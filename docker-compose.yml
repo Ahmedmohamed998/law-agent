@@ -1,0 +1,26 @@
+# Local Postgres for development. Same major version you deploy on, so a
+# behaviour difference is never "it worked on my laptop".
+#
+#   docker compose up -d
+#   docker compose exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d law_agent < sql/bootstrap.sql
+#   alembic upgrade head
+
+services:
+  db:
+    image: postgres:16
+    container_name: law_agent_db
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: law_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d law_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

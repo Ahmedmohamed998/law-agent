@@ -1,0 +1,137 @@
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../generated/prisma"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model alembic_version_product {
+  version_num String @id(map: "alembic_version_product_pkc") @db.VarChar(32)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model erasure_requests {
+  id           String    @id @db.VarChar(32)
+  user_id      String    @db.VarChar(32)
+  requested_at DateTime  @default(now()) @db.Timestamptz(6)
+  status       String    @default("pending") @db.VarChar(16)
+  attempts     Int       @default(0)
+  delivered_at DateTime? @db.Timestamptz(6)
+  last_error   String?
+
+  @@index([status, requested_at], map: "ix_erasure_pending")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model memberships {
+  user_id         String        @db.VarChar(32)
+  organization_id String        @db.VarChar(32)
+  role            String        @default("client") @db.VarChar(16)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([user_id, organization_id])
+  @@index([organization_id, role], map: "ix_memberships_org")
+}
+
+model organizations {
+  id          String        @id @db.VarChar(32)
+  name        String        @db.VarChar(200)
+  slug        String        @unique(map: "uq_organizations_slug") @db.VarChar(80)
+  created_at  DateTime      @default(now()) @db.Timestamptz(6)
+  deleted_at  DateTime?     @db.Timestamptz(6)
+  memberships memberships[]
+}
+
+model refresh_tokens {
+  id         String    @id @db.VarChar(32)
+  user_id    String    @db.VarChar(32)
+  family_id  String    @db.VarChar(32)
+  token_hash String    @unique(map: "uq_refresh_token_hash") @db.VarChar(64)
+  issued_at  DateTime  @default(now()) @db.Timestamptz(6)
+  expires_at DateTime  @db.Timestamptz(6)
+  used_at    DateTime? @db.Timestamptz(6)
+  revoked_at DateTime? @db.Timestamptz(6)
+  user_agent String?   @db.VarChar(400)
+  ip         String?   @db.VarChar(64)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([family_id], map: "ix_refresh_family")
+  @@index([user_id, expires_at], map: "ix_refresh_user")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model users {
+  id                String           @id @db.VarChar(32)
+  email             String?          @unique(map: "uq_users_email", where: raw("((deleted_at IS NULL) AND (email IS NOT NULL))")) @db.VarChar(320)
+  email_verified_at DateTime?        @db.Timestamptz(6)
+  password_hash     String?
+  display_name      String?          @db.VarChar(160)
+  phone             String?          @db.VarChar(32)
+  status            String           @default("active") @db.VarChar(16)
+  is_anonymous      Boolean          @default(false)
+  created_at        DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime         @default(now()) @db.Timestamptz(6)
+  last_login_at     DateTime?        @db.Timestamptz(6)
+  deleted_at        DateTime?        @db.Timestamptz(6)
+  consultations     consultations[]
+  memberships       memberships[]
+  refresh_tokens    refresh_tokens[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model consultations {
+  id               String     @id @db.VarChar(32)
+  user_id          String     @db.VarChar(32)
+  ai_session_id    String?    @db.VarChar(32)
+  status           String     @default("pending") @db.VarChar(16)
+  amount_cents     Int
+  currency         String     @default("EGP") @db.VarChar(3)
+  created_at       DateTime   @default(now()) @db.Timestamptz(6)
+  paid_at          DateTime?  @db.Timestamptz(6)
+  escalated_at     DateTime?  @db.Timestamptz(6)
+  escalation_error String?
+  chat_language    String?    @db.VarChar(16)
+  escalation_summary String?  @db.Text
+  users            users      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payments         payments[]
+
+  @@index([paid_at], map: "ix_consultations_unescalated", where: raw("(((status)::text = 'paid'::text) AND (escalated_at IS NULL))"))
+  @@index([user_id, created_at(sort: Desc)], map: "ix_consultations_user")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model payments {
+  id                String        @id @db.VarChar(32)
+  consultation_id   String        @db.VarChar(32)
+  provider          String        @default("paymob") @db.VarChar(24)
+  provider_order_id String?       @db.VarChar(64)
+  provider_txn_id   String        @db.VarChar(64)
+  amount_cents      Int
+  currency          String        @db.VarChar(3)
+  status            String        @db.VarChar(16)
+  raw               Json?
+  created_at        DateTime      @default(now()) @db.Timestamptz(6)
+  consultations     consultations @relation(fields: [consultation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([provider, provider_txn_id], map: "uq_payments_provider_txn")
+  @@index([consultation_id], map: "ix_payments_consultation")
+}
+
+model webhook_events {
+  id                String    @id @db.VarChar(32)
+  provider          String    @db.VarChar(24)
+  provider_event_id String    @db.VarChar(64)
+  signature_valid   Boolean
+  received_at       DateTime  @default(now()) @db.Timestamptz(6)
+  processed_at      DateTime? @db.Timestamptz(6)
+  error             String?
+  payload           Json
+
+  @@unique([provider, provider_event_id], map: "uq_webhook_event")
+  @@index([received_at], map: "ix_webhook_unprocessed", where: raw("(processed_at IS NULL)"))
+}

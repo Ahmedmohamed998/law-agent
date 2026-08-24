@@ -1,0 +1,16 @@
+
+boto3>=1.35.0
+chromadb==1.5.9
+gradio==6.20.0
+openai==2.50.0
+python-dotenv==1.2.2
+rank-bm25==0.2.2
+
+# service layer: sessions, API, auth
+alembic==1.18.2
+fastapi==0.141.1
+psycopg[binary]==3.3.3
+pydantic-settings==2.14.2
+PyJWT[crypto]==2.12.1
+sqlalchemy==2.0.45
+uvicorn[standard]==0.52.1

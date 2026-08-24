@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    // TypeScript 6 removed `moduleResolution: "node"` and `baseUrl`.
+    // node16 is the replacement for a CommonJS project on modern Node; with no
+    // "type": "module" in package.json it still emits CJS, which is what Nest's
+    // decorator metadata and dynamic module loading expect.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "declaration": false,
+    "removeComments": false,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    // Off deliberately: nest-cli's deleteOutDir clears dist/ but leaves
+    // tsconfig.tsbuildinfo behind, so an incremental build then decides
+    // everything is up to date and emits nothing — a build that "succeeds"
+    // with an empty dist/ and no error.
+    "incremental": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
