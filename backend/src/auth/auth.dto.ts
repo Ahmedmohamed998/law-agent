@@ -61,6 +61,13 @@ export class RefreshDto {
   organization_id?: string;
 }
 
+export class WordPressLoginDto {
+  /** `<base64url(payload)>.<base64url(hmac)>`, minted by the WordPress plugin. */
+  @IsString()
+  @Length(32, 4096)
+  assertion!: string;
+}
+
 export class LogoutDto {
   @IsString()
   @Length(16, 512)

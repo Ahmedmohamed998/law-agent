@@ -10,7 +10,15 @@ import {
 } from "@nestjs/common";
 import type { Request } from "express";
 
-import { LoginDto, LogoutDto, RefreshDto, SignupDto, type TokenOut, type UserOut } from "./auth.dto";
+import {
+  LoginDto,
+  LogoutDto,
+  RefreshDto,
+  SignupDto,
+  WordPressLoginDto,
+  type TokenOut,
+  type UserOut,
+} from "./auth.dto";
 import {
   AuthGuard,
   CurrentCaller,
@@ -20,6 +28,7 @@ import {
   type Caller,
 } from "./auth.guard";
 import { AuthService } from "./auth.service";
+import { WordPressService } from "./wordpress.service";
 import { ErasureService, type ErasureOut } from "../erasure/erasure.service";
 import { TokenService } from "../security/token.service";
 
@@ -29,6 +38,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly tokens: TokenService,
     private readonly erasure: ErasureService,
+    private readonly wordpress: WordPressService,
   ) {}
 
   @Post("anonymous")
@@ -83,6 +93,40 @@ export class AuthController {
   @HttpCode(204)
   logout(@Body() body: LogoutDto): Promise<void> {
     return this.auth.logout(body.refresh_token);
+  }
+
+
+  /**
+   * Log in with a WordPress assertion.
+   *
+   * WordPress owns the password, the reset flow and email verification --
+   * none of which this service has. It does not own tokens: it proves who is
+   * logged in, and this endpoint exchanges that proof for a normal RS256
+   * token. The AI service is unaware any of it happened.
+   *
+   * The bearer is OPTIONAL and read the same way signup reads it: if the
+   * caller is holding an anonymous token, that same user row is linked, so
+   * the conversation they had before logging in stays theirs.
+   */
+  @Post("wordpress")
+  @HttpCode(200)
+  async wordpressLogin(@Body() body: WordPressLoginDto, @Req() req: Request): Promise<TokenOut> {
+    const claims = await this.wordpress.verify(body.assertion);
+
+    let callerUserId: string | null = null;
+    const token = bearerFrom(req);
+    if (token) {
+      try {
+        const caller = await callerFromToken(this.tokens, token);
+        if (caller.anonymous) callerUserId = caller.userId;
+      } catch {
+        // An expired anonymous token is not a reason to refuse a login. It
+        // only means the earlier conversation cannot be carried over.
+        callerUserId = null;
+      }
+    }
+
+    return this.auth.fromWordPress(claims, req, callerUserId);
   }
 
   @Get("me")

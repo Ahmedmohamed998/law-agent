@@ -21,6 +21,7 @@ import type { Request } from "express";
 import { conflict, forbidden, notFound, unauthorized } from "../common/errors";
 import { newId } from "../common/ids";
 import { PrismaService } from "../prisma/prisma.service";
+import { WordPressService, type WordPressClaims } from "./wordpress.service";
 import { PasswordService } from "../security/password.service";
 import { TokenService } from "../security/token.service";
 import type { Caller } from "./auth.guard";
@@ -35,6 +36,9 @@ type UserWithMemberships = {
   password_hash: string | null;
   status: string;
   created_at: Date;
+  // Null for anyone who predates the WordPress link, or who never had one.
+  wp_user_id: number | null;
+  wp_role: string | null;
   memberships: {
     organization_id: string;
     role: string;
@@ -102,7 +106,16 @@ export class AuthService {
     requestedOrg?: string,
   ): { organizationId: string | null; role: string | null } {
     const memberships = user.memberships;
-    if (memberships.length === 0) return { organizationId: null, role: null };
+    if (memberships.length === 0) {
+      // No organization, but a WordPress administrator is still staff. The
+      // role travels without an org id, which is what StaffGuard checks --
+      // inventing an organization just to carry a role would put a fake row
+      // in front of every real one.
+      return {
+        organizationId: null,
+        role: WordPressService.mapRole(user.wp_role),
+      };
+    }
 
     if (requestedOrg) {
       const match = memberships.find((m) => m.organization_id === requestedOrg);
@@ -391,4 +404,88 @@ export class AuthService {
     if (user.status !== "active") throw forbidden("account is disabled");
     return this.userOut(user);
   }
+
+  // ── WordPress ───────────────────────────────────────────────────────────
+
+  /**
+   * Exchange a verified WordPress assertion for our own tokens.
+   *
+   * Three ways a row is found, in order, and the order is the whole design:
+   *
+   *   1. Already linked by wp_user_id — the normal repeat login.
+   *   2. The caller's own anonymous row — they chatted, then logged in. The
+   *      id is kept, so the conversations they already had are already
+   *      theirs. Same trick as signup, for the same reason.
+   *   3. An existing account with the same email — someone who registered
+   *      through the widget before WordPress owned identity. Linked rather
+   *      than duplicated, so their history and consultations survive.
+   *
+   * Only then is a new row created.
+   */
+  async fromWordPress(
+    claims: WordPressClaims,
+    req: Request,
+    callerUserId: string | null,
+  ): Promise<TokenOut> {
+    const email = claims.email ? normalizeEmail(claims.email) : null;
+
+    let user = (await this.prisma.users.findFirst({
+      where: { wp_user_id: claims.wp_user_id, deleted_at: null },
+      include: WITH_MEMBERSHIPS,
+    })) as UserWithMemberships | null;
+
+    if (!user && callerUserId) {
+      user = (await this.prisma.users.findFirst({
+        where: { id: callerUserId, deleted_at: null, is_anonymous: true },
+        include: WITH_MEMBERSHIPS,
+      })) as UserWithMemberships | null;
+    }
+
+    if (!user && email) {
+      user = (await this.prisma.users.findFirst({
+        where: { email, deleted_at: null, wp_user_id: null },
+        include: WITH_MEMBERSHIPS,
+      })) as UserWithMemberships | null;
+    }
+
+    const shared = {
+      wp_user_id: claims.wp_user_id,
+      wp_role: claims.wp_role ?? null,
+      is_anonymous: false,
+      display_name: claims.display_name ?? user?.display_name ?? null,
+      last_login_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    try {
+      if (user) {
+        user = (await this.prisma.users.update({
+          where: { id: user.id },
+          // The email follows WordPress, which is now the authority for it.
+          data: { ...shared, email: email ?? user.email },
+          include: WITH_MEMBERSHIPS,
+        })) as UserWithMemberships;
+      } else {
+        user = (await this.prisma.users.create({
+          data: { id: newId(), email, ...shared },
+          include: WITH_MEMBERSHIPS,
+        })) as UserWithMemberships;
+      }
+    } catch (err) {
+      // Two concurrent first logins race on uq_users_wp_user_id. The loser
+      // reads the row the winner wrote rather than failing a login over it.
+      if ((err as { code?: string }).code === "P2002") {
+        user = (await this.prisma.users.findFirst({
+          where: { wp_user_id: claims.wp_user_id, deleted_at: null },
+          include: WITH_MEMBERSHIPS,
+        })) as UserWithMemberships | null;
+        if (!user) throw err;
+      } else {
+        throw err;
+      }
+    }
+
+    return this.issue(user, req);
+  }
+
 }

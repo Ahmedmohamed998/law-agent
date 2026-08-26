@@ -28,6 +28,9 @@ export interface AppConfig {
   consultationPriceCents: number;
   consultationCurrency: string;
 
+  wordpressSharedSecret: string;
+  wordpressSiteUrl: string;
+
   port: number;
   bindHost: string;
   corsOriginRegex: string;
@@ -92,6 +95,14 @@ export function loadConfig(): AppConfig {
     consultationCurrency: (process.env.CONSULTATION_CURRENCY ?? "SAR")
       .trim()
       .toUpperCase(),
+
+    // WordPress owns credentials; this secret is how it proves a user is
+    // logged in. It never signs a token -- only an assertion this service
+    // exchanges for one. Unset means POST /auth/wordpress refuses to run.
+    wordpressSharedSecret: process.env.WORDPRESS_SHARED_SECRET ?? "",
+    // Checked against the assertion's `site` claim, so an assertion minted by
+    // a staging WordPress cannot log someone into production.
+    wordpressSiteUrl: (process.env.WORDPRESS_SITE_URL ?? "").replace(/\/+$/, ""),
 
     port: int("PORT", 8001),
     // Loopback by default: on a bare host nothing should reach this service
