@@ -78,6 +78,17 @@ class Settings(BaseSettings):
     # code change at the worst possible moment.
     cors_origin_regex: str = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
 
+    # -- binding ------------------------------------------------------------
+    # Loopback by default, because on a bare host this service must not be
+    # reachable except through the reverse proxy that adds TLS and turns off
+    # response buffering.
+    #
+    # In a container 127.0.0.1 is the container's own loopback, so nothing —
+    # not even the host — can reach it; there the value is 0.0.0.0 and the
+    # privacy comes from publishing the port as 127.0.0.1:8000 instead.
+    bind_host: str = "127.0.0.1"
+    bind_port: int = 8000
+
     @property
     def auth_enforced(self) -> bool:
         return bool(self.jwks_url)

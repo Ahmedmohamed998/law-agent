@@ -1,0 +1,36 @@
+# The AI image copies only app/, migrations/ and alembic.ini. Everything below
+# would otherwise be sent to the daemon as build context — including data/,
+# which is 79MB of index and several hundred MB of source PDFs.
+
+.git
+.gitattributes
+.gitignore
+
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.egg-info/
+
+# Secrets. Provided at runtime through env_file, never copied into a layer.
+.env
+.env.*
+!.env.example
+
+# Bind-mounted at runtime, not image content.
+data/
+
+# The other services and their own build contexts.
+backend/
+dashboard/
+product/
+
+# Not needed to run the service.
+demo/
+docs/
+eval/
+deploy/
+sql/
+README.md
+docker-compose.yml
+Dockerfile

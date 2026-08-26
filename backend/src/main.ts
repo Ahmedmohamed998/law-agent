@@ -44,9 +44,9 @@ async function bootstrap(): Promise<void> {
     allowedHeaders: ["Authorization", "Content-Type", "X-Admin-Key"],
   });
 
-  await app.listen(config.port, "127.0.0.1");
+  await app.listen(config.port, config.bindHost);
   new Logger("bootstrap").log(
-    `product backend on http://127.0.0.1:${config.port} — issuer ${config.jwtIssuer}`,
+    `product backend on http://${config.bindHost}:${config.port} — issuer ${config.jwtIssuer}`,
   );
 }
 

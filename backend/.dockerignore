@@ -1,0 +1,19 @@
+# Keep the build context small and keep secrets out of layers.
+
+.git
+node_modules/
+dist/
+generated/
+
+# Provided at runtime through env_file. A .env copied into a layer is a .env
+# in every registry that image reaches.
+.env
+.env.*
+!.env.example
+
+# The private signing key is bind-mounted, never built in.
+keys/
+
+README.md
+Dockerfile
+.dockerignore
