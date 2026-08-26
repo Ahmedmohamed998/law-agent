@@ -26,6 +26,9 @@ interface User {
   display_name: string | null;
   phone: string | null;
   joined_at: string;
+  /** WordPress owns identity; null for anyone who predates the link. */
+  wp_user_id: number | null;
+  wp_role: string | null;
 }
 
 interface Payment {
@@ -391,13 +394,19 @@ function App() {
                       <div className="user-cell">
                         <span className="user-name">{c.user?.display_name || 'Anonymous User'}</span>
                         <span className="user-email">{c.user?.email || c.user?.phone || 'No contact'}</span>
+                        {c.user?.wp_user_id != null && (
+                          <span className="user-email" style={{ opacity: 0.75 }}>
+                            WordPress #{c.user.wp_user_id}
+                            {c.user.wp_role ? ` · ${c.user.wp_role}` : ''}
+                          </span>
+                        )}
                         {c.chat_language && (
-                          <span className="badge" style={{ marginTop: '4px', fontSize: '10px', backgroundColor: '#334155', color: '#cbd5e1' }}>
+                          <span className="badge badge-language">
                             Language: {c.chat_language}
                           </span>
                         )}
                         {c.escalation_summary && (
-                          <div style={{ marginTop: '8px', fontSize: '12px', color: '#94a3b8', maxWidth: '300px' }}>
+                          <div className="case-summary">
                             {c.escalation_summary}
                           </div>
                         )}
@@ -413,14 +422,22 @@ function App() {
                       </span>
                     </td>
                     <td>
-                      {c.status === 'paid' ? (
-                        c.escalated ? (
-                          <span className="badge badge-success">Escalated</span>
-                        ) : (
-                          <span className="badge badge-danger">Failed to Escalate</span>
-                        )
-                      ) : (
+                      {c.status !== 'paid' ? (
                         <span className="badge badge-neutral">—</span>
+                      ) : c.escalated ? (
+                        <span className="badge badge-success">Escalated</span>
+                      ) : !c.ai_session_id ? (
+                        // Bought without a conversation attached. There is
+                        // nothing to hand over, so this is complete — not the
+                        // "money taken, service not delivered" case the red
+                        // badge is reserved for.
+                        <span className="badge badge-neutral" title="Bought without a conversation">
+                          No conversation
+                        </span>
+                      ) : (
+                        <span className="badge badge-danger" title={c.escalation_error || 'Escalation has not succeeded yet'}>
+                          Not handed over
+                        </span>
                       )}
                     </td>
                     <td style={{color: 'var(--text-secondary)', fontSize: '0.875rem'}}>

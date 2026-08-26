@@ -397,6 +397,10 @@ export class BillingService {
             display_name: true,
             phone: true,
             created_at: true,
+            // WordPress owns identity now; a lawyer picking this up wants to
+            // know which account it is on the site they administer.
+            wp_user_id: true,
+            wp_role: true,
           },
         },
         payments: {
@@ -425,6 +429,8 @@ export class BillingService {
             display_name: r.users.display_name ?? null,
             phone: r.users.phone ?? null,
             joined_at: r.users.created_at,
+            wp_user_id: r.users.wp_user_id ?? null,
+            wp_role: r.users.wp_role ?? null,
           }
         : null,
       latest_payment: r.payments[0]
@@ -483,6 +489,8 @@ export interface AdminConsultationRow {
     display_name: string | null;
     phone: string | null;
     joined_at: Date;
+    wp_user_id: number | null;
+    wp_role: string | null;
   } | null;
   latest_payment: {
     provider_txn_id: string;
