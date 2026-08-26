@@ -77,6 +77,17 @@ class Law_Agent_Assets {
 						'enabled'  => (bool) $o['consult_enabled'],
 						'checkout' => $o['paymob_iframe'],
 					),
+					// Where the widget asks WordPress who is signed in. Same
+					// origin, so the auth cookie travels; the shared secret
+					// never leaves PHP.
+					'sessionEndpoint' => esc_url_raw( rest_url( Law_Agent_Session::NAMESPACE . '/session' ) ),
+					// REQUIRED. The REST API does not accept a login cookie on
+					// its own: without this nonce, is_user_logged_in() inside a
+					// REST request returns false however valid the cookie is,
+					// and every signed-in visitor looks anonymous.
+					'restNonce'       => wp_create_nonce( 'wp_rest' ),
+					'loginUrl'        => $o['login_url'] ? $o['login_url'] : wp_login_url(),
+					'registerUrl'     => $o['register_url'],
 					'greeting'   => $o['greeting'],
 					'i18n'       => self::strings(),
 				)
@@ -136,6 +147,11 @@ class Law_Agent_Assets {
 			'signupSubmit'     => __( 'متابعة إلى الدفع', 'law-agent-chat' ),
 			'signupCancel'     => __( 'إلغاء', 'law-agent-chat' ),
 			'signupWorking'    => __( 'جارٍ التحويل إلى صفحة الدفع…', 'law-agent-chat' ),
+
+			'loginTitle'       => __( 'سجّل الدخول لإتمام الحجز', 'law-agent-chat' ),
+			'loginBody'        => __( 'محادثتك الحالية ستبقى محفوظة وتُربط بحسابك بعد تسجيل الدخول.', 'law-agent-chat' ),
+			'loginButton'      => __( 'تسجيل الدخول', 'law-agent-chat' ),
+			'registerButton'   => __( 'إنشاء حساب جديد', 'law-agent-chat' ),
 
 			'escalated'        => __( 'تم تحويل هذه المحادثة إلى محامٍ. لن يجيب المساعد الآلي عليها بعد الآن.', 'law-agent-chat' ),
 			'errEmailTaken'    => __( 'هذا البريد الإلكتروني مستخدم بالفعل. سجّل الدخول لإتمام الحجز.', 'law-agent-chat' ),

@@ -47,6 +47,10 @@
 		signupSubmit: 'متابعة إلى الدفع',
 		signupCancel: 'إلغاء',
 		signupWorking: 'جارٍ التحويل إلى صفحة الدفع…',
+		loginTitle: 'سجّل الدخول لإتمام الحجز',
+		loginBody: 'محادثتك الحالية ستبقى محفوظة وتُربط بحسابك بعد تسجيل الدخول.',
+		loginButton: 'تسجيل الدخول',
+		registerButton: 'إنشاء حساب جديد',
 		labelMixed: 'يتضمن معلومات من خارج المستندات الرسمية',
 		labelModel: 'لا يستند إلى المستندات الرسمية — قد يكون غير محدَّث',
 		escalated: 'تم تحويل هذه المحادثة إلى محامٍ.',
@@ -163,6 +167,9 @@
 	var Auth = {
 		state: read(AUTH_KEY),
 		inflight: null,
+		// Once per page load. Asking WordPress on every request would put a
+		// same-origin round trip in front of every message.
+		wpChecked: false,
 
 		user: function () {
 			return this.state && this.state.user ? this.state.user : null;
@@ -198,6 +205,51 @@
 			);
 		},
 
+		/**
+		 * Ask WordPress whether this visitor is signed in, and if so exchange
+		 * its assertion for our own token.
+		 *
+		 * The assertion is minted server-side in PHP -- the shared secret never
+		 * reaches this file. Any anonymous token already held is sent along,
+		 * so the backend links that same user row and the conversation from
+		 * before the login stays theirs.
+		 */
+		fromWordPress: function () {
+			var self = this;
+			if (!CFG.sessionEndpoint) return Promise.resolve(null);
+
+			// The nonce is what makes the cookie count. WordPress ignores a
+			// login cookie on a REST request without it -- silently, with a
+			// 200 and logged_in:false, which reads as "not signed in" rather
+			// than "you forgot the nonce".
+			var wpHeaders = { 'Accept': 'application/json' };
+			if (CFG.restNonce) wpHeaders['X-WP-Nonce'] = CFG.restNonce;
+
+			return fetch(CFG.sessionEndpoint, {
+				credentials: 'same-origin',
+				headers: wpHeaders
+			})
+				.then(function (res) { return res.json(); })
+				.then(function (wp) {
+					if (!wp || !wp.logged_in || !wp.assertion) return null;
+
+					var headers = { 'Content-Type': 'application/json' };
+					if (self.state && self.state.access_token && self.isAnonymous()) {
+						headers.Authorization = 'Bearer ' + self.state.access_token;
+					}
+					return request(BE, '/auth/wordpress', {
+						method: 'POST',
+						headers: headers,
+						body: JSON.stringify({ assertion: wp.assertion })
+					}).then(self.store.bind(self));
+				})
+				.catch(function () {
+					// WordPress being unreachable must not stop a visitor
+					// chatting: fall back to anonymous.
+					return null;
+				});
+		},
+
 		refresh: function () {
 			var self = this;
 			return request(BE, '/auth/refresh', {
@@ -222,7 +274,22 @@
 
 			var next;
 			if (!this.state || !this.state.access_token) {
-				next = this.anonymous();
+				// WordPress first: a signed-in visitor should never be handed
+				// an anonymous identity they then have to be migrated off.
+				this.wpChecked = true;
+				next = this.fromWordPress().then(function (s) {
+					return s || self.anonymous();
+				});
+			} else if (this.isAnonymous() && !this.wpChecked) {
+				// Holding a live anonymous token is NOT proof they are still
+				// anonymous. Someone who chatted, went off to log in, and came
+				// back arrives here with a token that has minutes left on it —
+				// and without this check would stay anonymous until it expired,
+				// with the booking button still asking them to sign in.
+				this.wpChecked = true;
+				next = this.fromWordPress().then(function (s) {
+					return s || self.state;
+				});
 			} else if (Date.now() >= this.state.expires_at) {
 				next = this.state.refresh_token ? this.refresh() : this.anonymous();
 			} else {
@@ -906,70 +973,50 @@
 		this.scroll();
 	};
 
+	/**
+	 * WordPress owns accounts now, so this does not collect a password -- it
+	 * sends people to the WordPress login, with a redirect back to this page.
+	 *
+	 * Their conversation is not lost by leaving: it is stored against the
+	 * anonymous user row, and on return the backend links that same row to the
+	 * WordPress user. Same id, same conversations.
+	 */
 	Widget.prototype.showSignup = function (box) {
-		var self = this;
-		if (box.querySelector('.la-signup')) return;
+		if (box.querySelector('.la-login')) return;
 
-		var form = el('form', 'la-signup');
-		form.appendChild(el('div', 'la-signup-title', T.signupTitle || ''));
-		form.appendChild(el('div', 'la-signup-body', T.signupBody || ''));
+		var panel = el('div', 'la-login');
+		panel.appendChild(el('div', 'la-signup-title', T.loginTitle));
+		panel.appendChild(el('div', 'la-signup-body', T.loginBody));
 
-		var name = el('input');
-		name.type = 'text';
-		name.placeholder = T.signupName || '';
-		name.autocomplete = 'name';
+		// Back to this page afterwards, so the conversation they were having
+		// is still on screen when they return -- and gets linked to the
+		// account they just used.
+		function withReturn(url) {
+			return url + (url.indexOf('?') === -1 ? '?' : '&') +
+				'redirect_to=' + encodeURIComponent(window.location.href);
+		}
 
-		var email = el('input');
-		email.type = 'email';
-		email.required = true;
-		email.placeholder = T.signupEmail || '';
-		email.autocomplete = 'email';
+		var actions = el('div', 'la-login-actions');
 
-		var password = el('input');
-		password.type = 'password';
-		password.required = true;
-		password.minLength = 10;
-		password.placeholder = T.signupPassword || '';
-		password.autocomplete = 'new-password';
+		var link = el('a', 'la-cta-button', T.loginButton);
+		link.href = withReturn(CFG.loginUrl || '#');
+		link.rel = 'nofollow';
+		actions.appendChild(link);
 
-		var submit = el('button', 'la-cta-button', T.signupSubmit || '');
-		submit.type = 'submit';
+		// Sites that split sign-in from sign-up get both. A first-time visitor
+		// dropped on a login form has to go hunting for the register link,
+		// which is the wrong thing to make someone do mid-purchase.
+		if (CFG.registerUrl) {
+			var reg = el('a', 'la-login-alt', T.registerButton);
+			reg.href = withReturn(CFG.registerUrl);
+			reg.rel = 'nofollow';
+			actions.appendChild(reg);
+		}
 
-		var cancel = el('button', 'la-signup-cancel', T.signupCancel || '');
-		cancel.type = 'button';
-		cancel.addEventListener('click', function () {
-			form.remove();
-		});
+		panel.appendChild(actions);
 
-		var status = el('div', 'la-signup-status');
-
-		[name, email, password, submit, cancel, status].forEach(function (n) {
-			form.appendChild(n);
-		});
-
-		form.addEventListener('submit', function (e) {
-			e.preventDefault();
-			submit.disabled = true;
-			status.textContent = '';
-			status.className = 'la-signup-status';
-
-			Auth.signup(email.value.trim(), password.value, name.value.trim())
-				.then(function () {
-					status.textContent = T.signupWorking || '';
-					return self.checkout(box, status);
-				})
-				.catch(function (err) {
-					submit.disabled = false;
-					status.className = 'la-signup-status is-error';
-					status.textContent = err.status === 409
-						? (T.errEmailTaken || humanError(err))
-						: (err.message || humanError(err));
-				});
-		});
-
-		box.appendChild(form);
+		box.appendChild(panel);
 		this.scroll();
-		email.focus();
 	};
 
 	Widget.prototype.checkout = function (box, statusNode) {

@@ -26,6 +26,9 @@ class Law_Agent_Settings {
 			'backend_url'      => 'http://127.0.0.1:8001',
 			'consult_enabled'  => 1,
 			'paymob_iframe'    => 'https://ksa.paymob.com/api/acceptance/iframes/13464',
+			'shared_secret'    => '',
+			'login_url'        => '',
+			'register_url'     => '',
 			'greeting'         => '',
 			'height'           => 620,
 		);
@@ -69,6 +72,18 @@ class Law_Agent_Settings {
 		// only ever disagree with the invoice.
 		$out['consult_enabled'] = empty( $in['consult_enabled'] ) ? 0 : 1;
 		$out['paymob_iframe']   = untrailingslashit( esc_url_raw( trim( (string) ( isset( $in['paymob_iframe'] ) ? $in['paymob_iframe'] : '' ) ) ) );
+		// Trimmed only. It is a shared secret, not a display string: sanitising
+		// it would silently change the bytes being signed and every assertion
+		// would fail verification for no visible reason.
+		// Empty means wp-login.php. A site with a branded Arabic login page
+		// should point here instead: sending someone from an Arabic legal
+		// service to the default WordPress form is a visible seam.
+		$out['login_url']       = esc_url_raw( trim( (string) ( isset( $in['login_url'] ) ? $in['login_url'] : '' ) ) );
+		// Optional second page. Sites that split sign-in from sign-up want the
+		// widget to offer both, because a first-time visitor sent to a login
+		// form has to find the register link themselves.
+		$out['register_url']    = esc_url_raw( trim( (string) ( isset( $in['register_url'] ) ? $in['register_url'] : '' ) ) );
+		$out['shared_secret']   = trim( (string) ( isset( $in['shared_secret'] ) ? $in['shared_secret'] : '' ) );
 		$out['greeting']        = sanitize_textarea_field( (string) ( isset( $in['greeting'] ) ? $in['greeting'] : '' ) );
 		$out['height']          = max( 320, absint( isset( $in['height'] ) ? $in['height'] : 620 ) );
 
@@ -141,6 +156,57 @@ class Law_Agent_Settings {
 						<td>
 							<input id="la-iframe" class="regular-text code" type="url" name="<?php echo esc_attr( $option ); ?>[paymob_iframe]" value="<?php echo esc_attr( $o['paymob_iframe'] ); ?>">
 							<p class="description"><?php esc_html_e( 'The visitor is sent here with ?payment_token= appended. Must match the Paymob region the backend is configured for.', 'law-agent-chat' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="la-login"><?php esc_html_e( 'Login page', 'law-agent-chat' ); ?></label></th>
+						<td>
+							<input id="la-login" class="regular-text code" type="url" name="<?php echo esc_attr( $option ); ?>[login_url]" value="<?php echo esc_attr( $o['login_url'] ); ?>" placeholder="<?php echo esc_attr( wp_login_url() ); ?>">
+							<p class="description">
+								<?php esc_html_e( 'Where a logged-out visitor is sent when they try to book. Leave empty for the default WordPress login form.', 'law-agent-chat' ); ?>
+								<?php esc_html_e( 'The page they were on is appended as redirect_to, so they come back to their conversation.', 'law-agent-chat' ); ?>
+							</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="la-register"><?php esc_html_e( 'Register page', 'law-agent-chat' ); ?></label></th>
+						<td>
+							<input id="la-register" class="regular-text code" type="url" name="<?php echo esc_attr( $option ); ?>[register_url]" value="<?php echo esc_attr( $o['register_url'] ); ?>">
+							<p class="description"><?php esc_html_e( 'Optional. If your sign-up lives on its own page, the widget offers it alongside sign-in. Leave empty to show only the login link.', 'law-agent-chat' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="la-secret"><?php esc_html_e( 'Shared secret', 'law-agent-chat' ); ?></label></th>
+						<td>
+							<?php if ( defined( 'LAW_AGENT_SHARED_SECRET' ) && LAW_AGENT_SHARED_SECRET ) : ?>
+								<p class="description">
+									<strong><?php esc_html_e( 'Set in wp-config.php.', 'law-agent-chat' ); ?></strong>
+									<?php esc_html_e( 'That constant wins over this field, which is the safer place for it.', 'law-agent-chat' ); ?>
+								</p>
+							<?php else : ?>
+								<input id="la-secret" class="regular-text code" type="password" autocomplete="off"
+									name="<?php echo esc_attr( $option ); ?>[shared_secret]"
+									value="<?php echo esc_attr( $o['shared_secret'] ); ?>">
+								<p class="description">
+									<?php esc_html_e( 'Must match WORDPRESS_SHARED_SECRET on the product backend. This is how WordPress proves a visitor is signed in.', 'law-agent-chat' ); ?>
+									<br>
+									<strong><?php esc_html_e( 'Better:', 'law-agent-chat' ); ?></strong>
+									<?php esc_html_e( 'put it in wp-config.php instead — a database dump is a far more common thing to hand around than a wp-config.', 'law-agent-chat' ); ?>
+									<code>define( 'LAW_AGENT_SHARED_SECRET', '…' );</code>
+								</p>
+							<?php endif; ?>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Secret fingerprint', 'law-agent-chat' ); ?></th>
+						<td>
+							<?php $fp = Law_Agent_Session::secret_fingerprint(); ?>
+							<?php if ( $fp ) : ?>
+								<code><?php echo esc_html( $fp ); ?></code>
+								<p class="description"><?php esc_html_e( 'Compare with `npm run secret:fingerprint` on the backend. If these differ, the assertion is rejected as "bad signature" — which looks identical to being logged out.', 'law-agent-chat' ); ?></p>
+							<?php else : ?>
+								<p class="description"><strong><?php esc_html_e( 'No secret set.', 'law-agent-chat' ); ?></strong> <?php esc_html_e( 'WordPress logins cannot be verified until one is.', 'law-agent-chat' ); ?></p>
+							<?php endif; ?>
 						</td>
 					</tr>
 					<tr>
