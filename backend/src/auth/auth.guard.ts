@@ -133,6 +133,86 @@ export class AdminKeyGuard implements CanActivate {
   }
 }
 
+/** Roles allowed to see the firm's money. Not `lawyer`, not `client`. */
+export const STAFF_ROLES = ["owner", "admin"] as const;
+
+/**
+ * A human on staff, proven by their own token.
+ *
+ * This exists because the admin dashboard used to authenticate with
+ * ADMIN_API_KEY, held in the browser's localStorage. That key is the
+ * service-to-service credential — the same class of secret that escalates
+ * sessions and erases users — and shipping it to a browser makes every
+ * dashboard user, every XSS, and every shared laptop a copy of it. It also
+ * cannot be attributed or revoked for one person.
+ *
+ * A role in a signed token has neither problem: it names who acted, it dies
+ * in fifteen minutes, and removing the membership removes the access.
+ */
+@Injectable()
+export class StaffGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest<RequestWithCaller>();
+    const role = req.caller?.role;
+    if (req.caller?.anonymous || !role || !STAFF_ROLES.includes(role as (typeof STAFF_ROLES)[number])) {
+      throw forbidden("this endpoint requires an admin or owner role");
+    }
+    return true;
+  }
+}
+
+/**
+ * Either a service holding the admin key, or a staff member holding a token.
+ *
+ * Two genuinely different callers reach these endpoints: a cron retrying
+ * escalations, which has no user and cannot log in, and a person looking at
+ * the dashboard. Forcing the person to carry the machine's key is what caused
+ * the problem above; removing the key would break the cron. So each gets the
+ * credential that suits it.
+ *
+ * The key is checked first and only when the header is present, so a browser
+ * never sends one and a missing key produces the token error, not
+ * `admin_unconfigured`.
+ */
+@Injectable()
+export class AdminKeyOrStaffGuard implements CanActivate {
+  private readonly config = loadConfig();
+
+  constructor(private readonly tokens: TokenService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<RequestWithCaller>();
+    const provided = String(req.headers["x-admin-key"] ?? "");
+
+    if (provided) {
+      const configured = this.config.adminApiKey;
+      if (!configured) {
+        throw new AppError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "admin_unconfigured",
+          "ADMIN_API_KEY is not set",
+        );
+      }
+      const a = Buffer.from(provided);
+      const b = Buffer.from(configured);
+      if (a.length !== b.length || !timingSafeEqual(a, b)) {
+        throw forbidden("bad admin key");
+      }
+      return true;
+    }
+
+    const token = bearerFrom(req);
+    if (!token) throw unauthorized("missing bearer token");
+    req.caller = await callerFromToken(this.tokens, token);
+
+    const role = req.caller.role;
+    if (req.caller.anonymous || !role || !STAFF_ROLES.includes(role as (typeof STAFF_ROLES)[number])) {
+      throw forbidden("this endpoint requires an admin or owner role");
+    }
+    return true;
+  }
+}
+
 export const CurrentCaller = createParamDecorator(
   (_data: unknown, context: ExecutionContext): Caller => {
     const req = context.switchToHttp().getRequest<RequestWithCaller>();

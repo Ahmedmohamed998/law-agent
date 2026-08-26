@@ -142,10 +142,22 @@ service, so real verification cannot be accidentally left off.
 
 | Method | Path | Purpose |
 |---|---|---|
+| `GET` | `/consultations/price` | What a consultation costs |
 | `POST` | `/consultations` | Buy a consultation; returns a Paymob payment key |
 | `GET` | `/consultations` | The caller's consultations |
 | `GET` | `/consultations/{id}` | One consultation |
 | `POST` | `/webhooks/paymob` | Gateway callback — **no auth guard**, HMAC verified |
+
+**The buyer does not name the price.** `POST /consultations` takes no
+`amount_cents` and no `currency`; both come from `CONSULTATION_PRICE_CENTS` and
+`CONSULTATION_CURRENCY`. They used to be request fields, which meant the amount
+charged was whatever the browser sent — a number anyone could edit in devtools
+before paying. A client still sending them now gets `400 invalid_request`
+naming the field, rather than having its price silently ignored.
+
+`GET /consultations/price` exists so the frontend can put a figure on the
+button without holding one of its own. It needs a token but not an account: an
+anonymous visitor sees the offer before they sign up, which is the funnel.
 
 ### Maintenance — requires `X-Admin-Key`
 
@@ -154,13 +166,31 @@ service, so real verification cannot be accidentally left off.
 | `DELETE` | `/admin/users/{userId}` | Erase a user and instruct the AI service |
 | `GET` | `/admin/erasure` | Requests not yet delivered |
 | `POST` | `/admin/erasure/retry` | Re-attempt delivery |
-| `GET` | `/admin/billing/unescalated` | Paid but not handed to a lawyer |
-| `POST` | `/admin/billing/retry-escalations` | Re-attempt escalation |
 
 The admin key opens exactly these, and **none of them can read a
 conversation**. They exist because their callers are services, not people: a
 payment gateway webhook carries no user identity, and erasure is cross-tenant
 by definition. Unset `ADMIN_API_KEY` makes them return `503` — fail-closed.
+
+### Dashboard — `X-Admin-Key` **or** an `owner`/`admin` token
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/admin/billing/stats` | Totals and revenue |
+| `GET` | `/admin/billing/consultations` | Full list, `?status=`, `?limit=`, `?offset=` |
+| `GET` | `/admin/billing/unescalated` | Paid but not handed to a lawyer |
+| `POST` | `/admin/billing/retry-escalations` | Re-attempt escalation |
+
+Two different callers reach these: a cron retrying escalations, which has no
+user and cannot log in, and a person looking at the dashboard. Each gets the
+credential that suits it.
+
+That split is why `dashboard/` no longer asks for the admin key. It used to,
+holding it in `localStorage` — so every dashboard user had a copy of the
+service-to-service secret, any XSS on that origin exfiltrated it, and it could
+neither be revoked for one person nor attributed to anyone. It now signs in at
+`/auth/login` and sends the resulting token. Grant access by giving someone an
+`admin` or `owner` membership; revoke it by removing the membership.
 
 ---
 

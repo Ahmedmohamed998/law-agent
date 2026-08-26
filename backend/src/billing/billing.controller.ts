@@ -9,14 +9,25 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { IsInt, IsOptional, IsString, Length, Max, Min } from "class-validator";
+import { IsOptional, IsString, Length } from "class-validator";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 
-import { AdminKeyGuard, AuthGuard, CurrentCaller, RegisteredGuard, type Caller } from "../auth/auth.guard";
+import { AdminKeyOrStaffGuard, AuthGuard, CurrentCaller, RegisteredGuard, type Caller } from "../auth/auth.guard";
 import { BillingService, type AdminConsultationRow, type ConsultationOut, type DashboardStats } from "./billing.service";
 import { PaymobService, type PaymobTransaction } from "./paymob.service";
+import { loadConfig } from "../config/configuration";
 
+/**
+ * What the buyer gets to choose. Note what is absent: the price.
+ *
+ * `amount_cents` and `currency` used to be fields here, bounded but
+ * client-supplied — so the amount charged was whatever the browser sent, and
+ * anyone could open devtools and buy a 500 SAR consultation for 1.00. They now
+ * come from configuration. Because the global ValidationPipe runs with
+ * `forbidNonWhitelisted`, an old client still sending them gets a 422 that
+ * names the field rather than a silently ignored price.
+ */
 export class CreateConsultationDto {
   /** The conversation a lawyer would take over. Optional: someone can buy a
    * consultation without having chatted first. */
@@ -24,18 +35,6 @@ export class CreateConsultationDto {
   @IsString()
   @Length(1, 32)
   ai_session_id?: string;
-
-  // Bounded on both ends. No maximum means a typo can charge someone 500,000
-  // EGP; no minimum means a zero-value order the gateway rejects confusingly.
-  @IsInt()
-  @Min(100)
-  @Max(10_000_000)
-  amount_cents!: number;
-
-  @IsOptional()
-  @IsString()
-  @Length(3, 3)
-  currency?: string;
 
   @IsOptional()
   @IsString()
@@ -51,7 +50,30 @@ export class CreateConsultationDto {
 @Controller("consultations")
 @UseGuards(AuthGuard)
 export class ConsultationsController {
+  private readonly config = loadConfig();
+
   constructor(private readonly billing: BillingService) {}
+
+  /**
+   * What a consultation costs.
+   *
+   * Declared before `:id` so Nest does not route "price" into the lookup.
+   *
+   * The frontend needs a number to put on the button, and the only safe way
+   * to give it one is to serve the same number the charge is built from. A
+   * price rendered from the client's own config is a price that can disagree
+   * with the invoice.
+   *
+   * Authenticated but not registered-only: an anonymous visitor sees the
+   * offer before they have an account, which is the whole funnel.
+   */
+  @Get("price")
+  price() {
+    return {
+      amount_cents: this.config.consultationPriceCents,
+      currency: this.config.consultationCurrency,
+    };
+  }
 
   /**
    * Buy a consultation.
@@ -68,12 +90,16 @@ export class ConsultationsController {
     const { consultation, paymentKey } = await this.billing.createConsultation({
       userId: caller.userId,
       aiSessionId: body.ai_session_id,
-      amountCents: body.amount_cents,
-      currency: body.currency ?? "EGP",
+      // From configuration, never from the request.
+      amountCents: this.config.consultationPriceCents,
+      currency: this.config.consultationCurrency,
       billing: {
         first_name: (body.full_name ?? "Client").split(" ")[0],
         last_name: (body.full_name ?? "Client").split(" ").slice(1).join(" ") || "Client",
-        phone_number: body.phone ?? "+200000000000",
+        // Paymob requires a phone; this filler is a Saudi number because the
+        // account is ksa.paymob.com. It is only ever used when the caller
+        // supplies none.
+        phone_number: body.phone ?? "+966500000000",
         email: "billing@lawagent.local",
         // Paymob rejects missing address fields; "NA" is its documented filler.
         apartment: "NA", floor: "NA", street: "NA", building: "NA",
@@ -144,8 +170,15 @@ export class WebhooksController {
   }
 }
 
+/**
+ * The dashboard's read surface, plus the escalation retry.
+ *
+ * Reachable two ways (see AdminKeyOrStaffGuard): a service with the admin key,
+ * or a signed-in owner/admin. The dashboard uses the second, so the shared key
+ * never has to be handed to a browser.
+ */
 @Controller("admin/billing")
-@UseGuards(AdminKeyGuard)
+@UseGuards(AdminKeyOrStaffGuard)
 export class BillingAdminController {
   constructor(private readonly billing: BillingService) {}
 

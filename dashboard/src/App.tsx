@@ -1,4 +1,5 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect } from 'react';
+import type { FormEvent } from 'react';
 import { 
   ShieldCheck, 
   LogOut, 
@@ -49,69 +50,189 @@ interface Consultation {
   escalation_summary: string | null;
 }
 
-const API_BASE = 'http://localhost:8001/admin/billing';
+const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8001';
+const API_BASE = `${BACKEND}/admin/billing`;
+
+/**
+ * This dashboard signs in as a person.
+ *
+ * It used to authenticate with ADMIN_API_KEY, typed into a password box and
+ * kept in localStorage. That key is the service-to-service credential — the
+ * same one that erases users and escalates sessions — so every dashboard user
+ * held a copy of it, any XSS on this origin exfiltrated it, and it could
+ * neither be revoked for one person nor attributed to anyone.
+ *
+ * It is now an ordinary login against the product backend, and the endpoints
+ * require an `owner` or `admin` role in the token. The access token lives
+ * about fifteen minutes; the refresh token is the revocable half.
+ */
+const SESSION_KEY = 'lawAgentAdminSession';
+
+interface Session {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  email: string | null;
+}
+
+function loadSession(): Session | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as Session) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(session: Session | null) {
+  try {
+    if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* a blocked store just means signing in again next visit */
+  }
+}
+
+function sessionFrom(payload: any): Session {
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    // 30s of slack, so a token never expires mid-request.
+    expiresAt: Date.now() + Math.max(0, (payload.expires_in ?? 900) - 30) * 1000,
+    email: payload.user?.email ?? null,
+  };
+}
+
+/** Every status from this backend carries { error: { code, message } }. */
+async function envelope(res: Response): Promise<any> {
+  const text = await res.text();
+  let body: any = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = null;
+  }
+  if (!res.ok) {
+    const err = body?.error ?? {};
+    throw Object.assign(new Error(err.message || res.statusText), {
+      code: err.code,
+      status: res.status,
+    });
+  }
+  return body;
+}
 
 function App() {
-  const [apiKey, setApiKey] = useState<string>(localStorage.getItem('adminApiKey') || '');
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [session, setSession] = useState<Session | null>(loadSession());
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string>('');
-  
+
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Auto-login if we have a key saved and it works
+  // Resume a stored session on load. A dead one just shows the login form.
   useEffect(() => {
-    if (apiKey) {
-      checkAuthAndLoadData(apiKey);
+    const stored = loadSession();
+    if (stored) {
+      loadData(stored).catch(() => clearSession());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const checkAuthAndLoadData = async (key: string) => {
+  const clearSession = () => {
+    setSession(null);
+    saveSession(null);
+    setIsAuthenticated(false);
+    setStats(null);
+    setConsultations([]);
+    setPassword('');
+  };
+
+  /** A session with a live access token, refreshed if it has aged out. */
+  const fresh = async (current: Session): Promise<Session> => {
+    if (Date.now() < current.expiresAt) return current;
+
+    const res = await fetch(`${BACKEND}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: current.refreshToken }),
+    });
+    const next = sessionFrom(await envelope(res));
+    setSession(next);
+    saveSession(next);
+    return next;
+  };
+
+  const loadData = async (current: Session) => {
     setIsLoading(true);
     setAuthError('');
     try {
-      const headers = { 'X-Admin-Key': key };
-      
-      // Fetch stats
-      const statsRes = await fetch(`${API_BASE}/stats`, { headers });
-      if (!statsRes.ok) {
-        if (statsRes.status === 403 || statsRes.status === 401) {
-          throw new Error('Invalid Admin API Key');
-        }
-        throw new Error('Failed to load stats');
-      }
-      const statsData = await statsRes.json();
-      
-      // Fetch consultations
-      const consultsRes = await fetch(`${API_BASE}/consultations`, { headers });
-      if (!consultsRes.ok) throw new Error('Failed to load consultations');
-      const consultsData = await consultsRes.json();
-      
+      const live = await fresh(current);
+      const headers = { Authorization: `Bearer ${live.accessToken}` };
+
+      const statsData = await fetch(`${API_BASE}/stats`, { headers }).then(envelope);
+      const consultsData = await fetch(`${API_BASE}/consultations`, { headers }).then(envelope);
+
       setStats(statsData);
       setConsultations(consultsData);
+      setSession(live);
       setIsAuthenticated(true);
-      localStorage.setItem('adminApiKey', key);
+      saveSession(live);
     } catch (err: any) {
-      setAuthError(err.message || 'Connection failed');
+      // A 403 here is a real account without the role, which is a different
+      // problem from a wrong password and deserves to say so.
+      setAuthError(
+        err.status === 403
+          ? 'This account does not have an admin or owner role.'
+          : err.status === 401
+            ? 'Session expired. Sign in again.'
+            : err.message || 'Connection failed',
+      );
       setIsAuthenticated(false);
-      localStorage.removeItem('adminApiKey');
+      throw err;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleLogin = (e: FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
-    checkAuthAndLoadData(apiKey);
+    setIsLoading(true);
+    setAuthError('');
+    try {
+      const res = await fetch(`${BACKEND}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const next = sessionFrom(await envelope(res));
+      setSession(next);
+      saveSession(next);
+      setPassword('');
+      await loadData(next);
+    } catch (err: any) {
+      if (err.status === 401) setAuthError('Wrong email or password.');
+      else if (!err.status) setAuthError(err.message || 'Connection failed');
+      setIsAuthenticated(false);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleLogout = () => {
-    setApiKey('');
-    setIsAuthenticated(false);
-    setStats(null);
-    setConsultations([]);
-    localStorage.removeItem('adminApiKey');
+    // Revoking the refresh token is what actually ends the session; clearing
+    // local state alone would leave a valid credential live in the backend.
+    if (session) {
+      fetch(`${BACKEND}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: session.refreshToken }),
+      }).catch(() => undefined);
+    }
+    clearSession();
   };
 
   const formatMoney = (cents: number, currency: string = 'SAR') => {
@@ -140,26 +261,40 @@ function App() {
           
           <form className="login-form" onSubmit={handleLogin}>
             <div className="input-group">
-              <label className="input-label">Admin API Key</label>
-              <input 
-                type="password"
+              <label className="input-label">Email</label>
+              <input
+                type="email"
                 className="input-field"
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-                placeholder="Enter secret key..."
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@firm.example"
+                autoComplete="username"
                 required
               />
             </div>
-            
+
+            <div className="input-group">
+              <label className="input-label">Password</label>
+              <input
+                type="password"
+                className="input-field"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••••"
+                autoComplete="current-password"
+                required
+              />
+            </div>
+
             {authError && (
               <div className="error-message">
                 <AlertCircle size={16} style={{display: 'inline', marginRight: 8}}/>
                 {authError}
               </div>
             )}
-            
-            <button type="submit" className="submit-btn" disabled={isLoading || !apiKey}>
-              {isLoading ? <Loader2 className="animate-spin" style={{margin: '0 auto'}}/> : 'Authenticate'}
+
+            <button type="submit" className="submit-btn" disabled={isLoading || !email || !password}>
+              {isLoading ? <Loader2 className="animate-spin" style={{margin: '0 auto'}}/> : 'Sign in'}
             </button>
           </form>
         </div>

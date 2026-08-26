@@ -25,7 +25,11 @@ export interface AppConfig {
   aiServiceUrl: string;
   adminApiKey: string;
 
+  consultationPriceCents: number;
+  consultationCurrency: string;
+
   port: number;
+  bindHost: string;
   corsOriginRegex: string;
 }
 
@@ -76,7 +80,26 @@ export function loadConfig(): AppConfig {
     aiServiceUrl: process.env.AI_SERVICE_URL ?? "http://127.0.0.1:8000",
     adminApiKey: process.env.ADMIN_API_KEY ?? "",
 
+    // The price of a consultation is decided here and nowhere else.
+    // It used to arrive in the request body, which meant the amount charged
+    // was whatever the browser said it was — a number anyone could edit
+    // before paying. A price is a property of the product, not of the
+    // request.
+    consultationPriceCents: int("CONSULTATION_PRICE_CENTS", 50_000),
+    // The gateway is ksa.paymob.com (see PAYMOB_BASE), so the default is the
+    // currency that account settles in. A mismatch here is rejected by
+    // Paymob at order creation rather than silently mischarged.
+    consultationCurrency: (process.env.CONSULTATION_CURRENCY ?? "SAR")
+      .trim()
+      .toUpperCase(),
+
     port: int("PORT", 8001),
+    // Loopback by default: on a bare host nothing should reach this service
+    // except the reverse proxy. Inside a container 127.0.0.1 is the
+    // container's own loopback and nothing can reach it at all, so there the
+    // value is 0.0.0.0 and privacy comes from publishing the port as
+    // 127.0.0.1:8001 on the host instead.
+    bindHost: process.env.BIND_HOST ?? "127.0.0.1",
     corsOriginRegex:
       process.env.CORS_ORIGIN_REGEX ?? "https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?",
   };

@@ -19,6 +19,9 @@ import "dotenv/config";
 import { createHmac } from "node:crypto";
 
 import { HMAC_FIELDS, hmacValue } from "../billing/paymob.service";
+import { loadConfig } from "../config/configuration";
+
+const config = loadConfig();
 
 function pluck(obj: Record<string, unknown>, path: string): unknown {
   return path
@@ -47,9 +50,11 @@ async function main(): Promise<void> {
 
   const transaction: Record<string, unknown> = {
     id: txnId,
-    amount_cents: 50000,
+    // Mirror what the service would actually charge, so a simulated callback
+    // matches the consultation it is settling rather than a stale constant.
+    amount_cents: config.consultationPriceCents,
     created_at: new Date().toISOString(),
-    currency: "EGP",
+    currency: config.consultationCurrency,
     error_occured: false,
     has_parent_transaction: false,
     integration_id: Number(process.env.PAYMOB_INTEGRATION_ID ?? 1),

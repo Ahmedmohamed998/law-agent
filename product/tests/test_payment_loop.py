@@ -89,9 +89,16 @@ def main() -> int:
 
     print()
     print("=== 2. they buy a consultation ===")
+    # The price is the server's. The frontend asks what it is rather than
+    # deciding it, so the number on the button and the number charged cannot
+    # disagree.
+    quoted = httpx.get(f"{NODE}/consultations/price", headers=H, timeout=15)
+    check("price is quoted by the backend", quoted.status_code == 200, quoted.text[:160])
+    price = quoted.json()
+
     created = httpx.post(
         f"{NODE}/consultations",
-        json={"ai_session_id": session_id, "amount_cents": 50000, "currency": "EGP"},
+        json={"ai_session_id": session_id},
         headers=H,
         timeout=20,
     )
@@ -99,10 +106,34 @@ def main() -> int:
     consultation_id = created.json()["consultation_id"]
     check("starts pending", created.json()["status"] == "pending")
     check("not yet escalated", created.json()["escalated"] is False)
+    check(
+        "charged the quoted price, not a client-supplied one",
+        created.json()["amount_cents"] == price["amount_cents"]
+        and created.json()["currency"] == price["currency"],
+        f"quoted {price}, charged {created.json()['amount_cents']} {created.json()['currency']}",
+    )
+
+    # The old contract let the buyer name their own price. Sending it now has
+    # to fail loudly: silently ignoring it would leave every existing client
+    # believing it had set an amount.
+    underpay = httpx.post(
+        f"{NODE}/consultations",
+        json={"ai_session_id": session_id, "amount_cents": 100},
+        headers=H,
+        timeout=20,
+    )
+    check(
+        "a client-supplied price is rejected, not ignored",
+        # 400 from the Node validation pipe, 422 from the Python one; both
+        # carry code `invalid_request`, which is the part the client branches on.
+        underpay.status_code in (400, 422)
+        and underpay.json().get("error", {}).get("code") == "invalid_request",
+        f"got {underpay.status_code}: {underpay.text[:160]}",
+    )
 
     dupe = httpx.post(
         f"{NODE}/consultations",
-        json={"ai_session_id": session_id, "amount_cents": 50000},
+        json={"ai_session_id": session_id},
         headers=H,
         timeout=20,
     )
