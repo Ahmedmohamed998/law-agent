@@ -90,7 +90,7 @@ model consultations {
   ai_session_id    String?    @db.VarChar(32)
   status           String     @default("pending") @db.VarChar(16)
   amount_cents     Int
-  currency         String     @default("EGP") @db.VarChar(3)
+  currency         String     @default("SAR") @db.VarChar(3)
   created_at       DateTime   @default(now()) @db.Timestamptz(6)
   paid_at          DateTime?  @db.Timestamptz(6)
   escalated_at     DateTime?  @db.Timestamptz(6)
