@@ -1,0 +1,482 @@
+/**
+ * Everything is scoped under .law-agent-chat and every property is set
+ * explicitly, because this widget lands inside somebody else's theme --
+ * Elementor and Hostinger themes both style bare <button> and <table>.
+ */
+
+.law-agent-chat {
+	--la-bg: #f3f5f6;
+	--la-panel: #ffffff;
+	--la-ink: #16202a;
+	--la-muted: #64757f;
+	--la-rule: #dde4e8;
+	--la-accent: #0e6b47;
+	--la-accent-ink: #ffffff;
+	--la-accent-soft: #e8f2ed;
+	--la-warn: #96560a;
+	--la-warn-soft: #fbf1e2;
+	--la-danger: #9a2c2c;
+	--la-radius: 10px;
+
+	display: grid;
+	grid-template-columns: 1fr;
+	height: var(--law-agent-height, 620px);
+	max-height: 90vh;
+	border: 1px solid var(--la-rule);
+	border-radius: var(--la-radius);
+	overflow: hidden;
+	background: var(--la-bg);
+	color: var(--la-ink);
+	font-family: system-ui, "Segoe UI", "Noto Naskh Arabic", "Tahoma", sans-serif;
+	font-size: 15px;
+	line-height: 1.7;
+	text-align: right;
+}
+
+@media (prefers-color-scheme: dark) {
+	.law-agent-chat {
+		--la-bg: #10151a;
+		--la-panel: #171e24;
+		--la-ink: #e6ecef;
+		--la-muted: #93a3ad;
+		--la-rule: #27313a;
+		--la-accent: #4cbc8d;
+		--la-accent-ink: #0a1410;
+		--la-accent-soft: #12291f;
+		--la-warn: #d8a055;
+		--la-warn-soft: #2a2110;
+		--la-danger: #e08585;
+	}
+}
+
+.law-agent-chat *,
+.law-agent-chat *::before,
+.law-agent-chat *::after {
+	box-sizing: border-box;
+}
+
+.law-agent-chat.has-sidebar {
+	grid-template-columns: 260px 1fr;
+}
+
+@media (max-width: 782px) {
+	.law-agent-chat.has-sidebar {
+		grid-template-columns: 1fr;
+	}
+	.law-agent-chat .la-sidebar {
+		display: none;
+	}
+}
+
+/* ── sidebar ─────────────────────────────────────────────────────────── */
+
+.law-agent-chat .la-sidebar {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	background: var(--la-panel);
+	border-inline-start: 1px solid var(--la-rule);
+}
+
+.law-agent-chat .la-new {
+	margin: 12px;
+	padding: 9px 12px;
+	border: 0;
+	border-radius: 7px;
+	background: var(--la-accent);
+	color: var(--la-accent-ink);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.law-agent-chat .la-sessions {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 0 8px 12px;
+}
+
+.law-agent-chat .la-session {
+	display: block;
+	width: 100%;
+	padding: 8px 10px;
+	margin-bottom: 2px;
+	border: 1px solid transparent;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--la-muted);
+	font: inherit;
+	font-size: 13.5px;
+	text-align: right;
+	cursor: pointer;
+}
+
+.law-agent-chat .la-session:hover {
+	background: var(--la-bg);
+}
+
+.law-agent-chat .la-session.is-current {
+	border-color: var(--la-rule);
+	background: var(--la-accent-soft);
+	color: var(--la-ink);
+}
+
+.law-agent-chat .la-session-title {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.law-agent-chat .la-session-status {
+	display: inline-block;
+	margin-top: 2px;
+	font-size: 11px;
+	color: var(--la-warn);
+}
+
+/* ── thread ──────────────────────────────────────────────────────────── */
+
+.law-agent-chat .la-main {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	min-width: 0;
+}
+
+.law-agent-chat .la-log {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 20px 18px;
+	scroll-behavior: smooth;
+}
+
+.law-agent-chat .la-thread {
+	max-width: 760px;
+	margin: 0 auto;
+}
+
+.law-agent-chat .la-msg {
+	margin-bottom: 16px;
+}
+
+.law-agent-chat .la-msg.user {
+	display: flex;
+	justify-content: flex-start;
+}
+
+.law-agent-chat .la-bubble {
+	display: inline-block;
+	max-width: 100%;
+	padding: 12px 15px;
+	border: 1px solid var(--la-rule);
+	border-radius: var(--la-radius);
+	background: var(--la-panel);
+}
+
+.law-agent-chat .la-msg.user .la-bubble {
+	background: var(--la-accent-soft);
+	border-color: transparent;
+	white-space: pre-wrap;
+}
+
+.law-agent-chat .la-md > *:first-child {
+	margin-top: 0;
+}
+
+.law-agent-chat .la-md > *:last-child {
+	margin-bottom: 0;
+}
+
+.law-agent-chat .la-md p {
+	margin: 0 0 10px;
+}
+
+.law-agent-chat .la-md ul {
+	margin: 0 0 10px;
+	padding-inline-start: 22px;
+}
+
+.law-agent-chat .la-md code {
+	padding: 1px 5px;
+	border-radius: 4px;
+	background: var(--la-bg);
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 0.9em;
+	direction: ltr;
+	display: inline-block;
+}
+
+/* Penalty schedules come back as real Markdown tables and are often wide. */
+.law-agent-chat .la-table {
+	overflow-x: auto;
+	margin: 0 0 10px;
+}
+
+.law-agent-chat .la-table table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 14px;
+}
+
+.law-agent-chat .la-table th,
+.law-agent-chat .la-table td {
+	padding: 7px 10px;
+	border: 1px solid var(--la-rule);
+	text-align: right;
+	vertical-align: top;
+}
+
+.law-agent-chat .la-table th {
+	background: var(--la-bg);
+	font-weight: 600;
+}
+
+.law-agent-chat .is-streaming .la-md::after {
+	content: "▌";
+	color: var(--la-muted);
+	animation: la-blink 1s steps(2) infinite;
+}
+
+@keyframes la-blink {
+	50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.law-agent-chat .la-log { scroll-behavior: auto; }
+	.law-agent-chat .is-streaming .la-md::after { animation: none; }
+}
+
+/* ── labels and sources ──────────────────────────────────────────────── */
+
+.law-agent-chat .la-label {
+	margin-top: 10px;
+	padding: 7px 10px;
+	border-radius: 7px;
+	background: var(--la-warn-soft);
+	color: var(--la-warn);
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.law-agent-chat .la-sources {
+	margin-top: 10px;
+	border-top: 1px solid var(--la-rule);
+	padding-top: 8px;
+	font-size: 13.5px;
+}
+
+.law-agent-chat .la-sources summary {
+	cursor: pointer;
+	color: var(--la-muted);
+}
+
+.law-agent-chat .la-sources ul {
+	margin: 8px 0 0;
+	padding-inline-start: 20px;
+}
+
+.law-agent-chat .la-sources li {
+	margin-bottom: 4px;
+}
+
+.law-agent-chat .la-reason {
+	color: var(--la-muted);
+}
+
+/* ── consultation CTA ────────────────────────────────────────────────── */
+
+.law-agent-chat .la-cta {
+	margin-top: 12px;
+	padding: 14px;
+	border: 1px solid var(--la-accent);
+	border-radius: var(--la-radius);
+	background: var(--la-accent-soft);
+}
+
+.law-agent-chat .la-cta-title {
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+
+.law-agent-chat .la-cta-body {
+	color: var(--la-muted);
+	font-size: 14px;
+	margin-bottom: 10px;
+}
+
+.law-agent-chat .la-cta-button {
+	display: inline-block;
+	padding: 10px 16px;
+	border: 0;
+	border-radius: 7px;
+	background: var(--la-accent);
+	color: var(--la-accent-ink);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.law-agent-chat .la-cta-button[disabled] {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.law-agent-chat .la-signup {
+	display: grid;
+	gap: 8px;
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px solid var(--la-rule);
+}
+
+.law-agent-chat .la-signup-title {
+	font-weight: 600;
+}
+
+.law-agent-chat .la-signup-body {
+	font-size: 13.5px;
+	color: var(--la-muted);
+}
+
+.law-agent-chat .la-signup input {
+	width: 100%;
+	padding: 9px 11px;
+	border: 1px solid var(--la-rule);
+	border-radius: 7px;
+	background: var(--la-panel);
+	color: var(--la-ink);
+	font: inherit;
+	text-align: right;
+}
+
+.law-agent-chat .la-signup-cancel {
+	border: 0;
+	background: none;
+	color: var(--la-muted);
+	font: inherit;
+	font-size: 13.5px;
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.law-agent-chat .la-signup-status {
+	font-size: 13.5px;
+	color: var(--la-muted);
+}
+
+.law-agent-chat .la-signup-status.is-error {
+	color: var(--la-danger);
+}
+
+/* ── persistent booking bar ──────────────────────────────────────────── */
+
+.law-agent-chat .la-bookbar {
+	display: flex;
+	justify-content: flex-start;
+	padding: 9px 12px;
+	border-top: 1px solid var(--la-rule);
+	background: var(--la-accent-soft);
+}
+
+.law-agent-chat .la-bookbar[hidden] {
+	display: none;
+}
+
+.law-agent-chat .la-book {
+	padding: 8px 15px;
+	border: 1px solid var(--la-accent);
+	border-radius: 7px;
+	background: transparent;
+	color: var(--la-accent);
+	font: inherit;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.law-agent-chat .la-book:hover,
+.law-agent-chat .la-book:focus-visible {
+	background: var(--la-accent);
+	color: var(--la-accent-ink);
+}
+
+/* Opened from the bar rather than attached to a refused answer: no heading,
+   so it reads as an offer rather than an apology. */
+.law-agent-chat .la-booking-panel .la-bubble {
+	border-color: var(--la-accent);
+}
+
+/* ── composer ────────────────────────────────────────────────────────── */
+
+.law-agent-chat .la-composer {
+	display: flex;
+	gap: 10px;
+	align-items: flex-end;
+	padding: 12px;
+	border-top: 1px solid var(--la-rule);
+	background: var(--la-panel);
+}
+
+.law-agent-chat .la-input {
+	flex: 1;
+	min-height: 46px;
+	max-height: 160px;
+	padding: 11px 13px;
+	border: 1px solid var(--la-rule);
+	border-radius: 8px;
+	background: var(--la-bg);
+	color: var(--la-ink);
+	font: inherit;
+	line-height: 1.6;
+	resize: vertical;
+	text-align: right;
+}
+
+.law-agent-chat .la-send {
+	padding: 12px 20px;
+	border: 0;
+	border-radius: 8px;
+	background: var(--la-accent);
+	color: var(--la-accent-ink);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.law-agent-chat .la-send[disabled],
+.law-agent-chat .la-input[disabled] {
+	opacity: 0.55;
+	cursor: default;
+}
+
+/* ── errors ──────────────────────────────────────────────────────────── */
+
+.law-agent-chat .la-error {
+	margin-top: 8px;
+	padding: 9px 11px;
+	border-radius: 7px;
+	background: var(--la-warn-soft);
+	color: var(--la-danger);
+	font-size: 14px;
+}
+
+.law-agent-chat .la-retry {
+	margin-top: 8px;
+	padding: 7px 14px;
+	border: 1px solid var(--la-rule);
+	border-radius: 7px;
+	background: var(--la-panel);
+	color: var(--la-ink);
+	font: inherit;
+	cursor: pointer;
+}
+
+.law-agent-notice {
+	padding: 12px 14px;
+	border: 1px dashed #c3512f;
+	border-radius: 8px;
+	color: #c3512f;
+}
