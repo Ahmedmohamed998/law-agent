@@ -54,6 +54,12 @@
 	font-size: 15px;
 	line-height: 1.75;
 	text-align: right;
+
+	/* The widget adapts to the box it is put in, not to the browser window.
+	   A popup or a narrow column on a wide desktop is still a narrow widget,
+	   and a viewport media query cannot tell. */
+	container-type: inline-size;
+	container-name: law-agent;
 	box-shadow: 0 1px 2px rgba(16, 49, 47, .05), 0 8px 24px -12px rgba(16, 49, 47, .18);
 }
 
@@ -63,9 +69,28 @@
 
 .law-agent-chat.has-sidebar { grid-template-columns: 264px 1fr; }
 
-@media (max-width: 782px) {
+/* Below ~560px of WIDGET width the conversation list costs more than it
+   gives: it would take half the room the conversation needs. */
+@container law-agent (max-width: 560px) {
 	.law-agent-chat.has-sidebar { grid-template-columns: 1fr; }
 	.law-agent-chat .la-sidebar { display: none; }
+}
+
+/* Fallback for browsers without container queries: the old viewport rule,
+   which is right for phones and merely unhelpful inside a desktop popup. */
+@supports not (container-type: inline-size) {
+	@media (max-width: 782px) {
+		.law-agent-chat.has-sidebar { grid-template-columns: 1fr; }
+		.law-agent-chat .la-sidebar { display: none; }
+	}
+}
+
+/* Dropped into a popup or a flex cell that sizes itself: fill it instead of
+   insisting on a pixel height that fights the container. */
+.law-agent-chat.is-fill {
+	height: 100%;
+	min-height: 0;
+	max-height: none;
 }
 
 /* ── sidebar ─────────────────────────────────────────────────────────── */
@@ -266,6 +291,13 @@
 	.law-agent-chat .la-log { scroll-behavior: auto; }
 	.law-agent-chat .is-streaming .la-md::after { animation: none; }
 	.law-agent-chat * { transition: none !important; }
+}
+
+@container law-agent (max-width: 480px) {
+	.law-agent-chat .la-log { padding: 16px 13px; }
+	.law-agent-chat .la-composer { padding: 11px; }
+	.law-agent-chat .la-send { padding: 13px 16px; }
+	.law-agent-chat .la-bubble { max-width: 100%; }
 }
 
 /* ── provenance ──────────────────────────────────────────────────────── */

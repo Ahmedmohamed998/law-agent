@@ -1075,21 +1075,67 @@
 		}
 	}
 
-	if (document.readyState === 'loading') {
-		document.addEventListener('DOMContentLoaded', boot);
-	} else {
-		boot();
+	/**
+	 * Mount whenever a widget appears, however it got there.
+	 *
+	 * An Elementor popup injects its content long after DOMContentLoaded, and
+	 * `elementor/frontend/init` may already have fired by the time this file
+	 * runs in the footer — so a handler registered for it never executes and
+	 * the widget never mounts. The symptom is brutal rather than subtle: the
+	 * composer is a real <form>, so pressing send submits it natively and the
+	 * page reloads with nothing to show for it.
+	 *
+	 * Watching the DOM covers popups, tabs, accordions, AJAX and anything else
+	 * without knowing which of them did it. boot() is idempotent, so a noisy
+	 * observer is only wasted comparisons.
+	 */
+	function watch() {
+		if (!window.MutationObserver || !document.body) return;
+
+		var queued = false;
+		new MutationObserver(function () {
+			if (queued) return;
+			queued = true;
+			// Coalesce a burst of mutations into one pass.
+			window.requestAnimationFrame(function () {
+				queued = false;
+				boot();
+			});
+		}).observe(document.body, { childList: true, subtree: true });
 	}
 
-	// Elementor re-renders widgets in the editor preview without a page load.
+	function start() {
+		boot();
+		watch();
+	}
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', start);
+	} else {
+		start();
+	}
+
+	// Elementor's own signals, for the cases the observer would only catch a
+	// frame later. Registered directly when the framework is already up,
+	// because waiting for an event that has already fired waits forever.
+	function wireElementor() {
+		if (!window.elementorFrontend || !window.elementorFrontend.hooks) return;
+		window.elementorFrontend.hooks.addAction(
+			'frontend/element_ready/law_agent_chat.default',
+			boot
+		);
+	}
+
+	if (window.elementorFrontend) {
+		wireElementor();
+	} else if (window.jQuery) {
+		window.jQuery(window).on('elementor/frontend/init', wireElementor);
+	}
+
+	// A popup's content is only reliably in the DOM once it is shown.
 	if (window.jQuery) {
-		window.jQuery(window).on('elementor/frontend/init', function () {
-			if (window.elementorFrontend && window.elementorFrontend.hooks) {
-				window.elementorFrontend.hooks.addAction(
-					'frontend/element_ready/law_agent_chat.default',
-					boot
-				);
-			}
+		window.jQuery(document).on('elementor/popup/show', function () {
+			boot();
 		});
 	}
 })();

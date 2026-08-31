@@ -65,6 +65,17 @@ class Law_Agent_Elementor_Widget extends \Elementor\Widget_Base {
 		);
 
 		$this->add_control(
+			'fill',
+			array(
+				'label'        => __( 'Fill container height', 'law-agent-chat' ),
+				'description'  => __( 'For popups and any container that sets its own height. Ignores the height above.', 'law-agent-chat' ),
+				'type'         => \Elementor\Controls_Manager::SWITCHER,
+				'default'      => '',
+				'return_value' => 'yes',
+			)
+		);
+
+		$this->add_control(
 			'sidebar',
 			array(
 				'label'        => __( 'Show conversation list', 'law-agent-chat' ),
@@ -89,10 +100,12 @@ class Law_Agent_Elementor_Widget extends \Elementor\Widget_Base {
 	protected function render() {
 		$s = $this->get_settings_for_display();
 
+		$fill = isset( $s['fill'] ) && 'yes' === $s['fill'];
+
 		echo do_shortcode(
 			sprintf(
-				'[law_agent_chat height="%d" sidebar="%s"]',
-				max( 320, absint( isset( $s['height'] ) ? $s['height'] : 620 ) ),
+				'[law_agent_chat height="%s" sidebar="%s"]',
+				$fill ? 'fill' : (string) max( 320, absint( isset( $s['height'] ) ? $s['height'] : 620 ) ),
 				( isset( $s['sidebar'] ) && 'yes' === $s['sidebar'] ) ? 'yes' : 'no'
 			)
 		);

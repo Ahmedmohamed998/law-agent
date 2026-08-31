@@ -38,10 +38,17 @@ class Law_Agent_Shortcode {
 
 		Law_Agent_Assets::enqueue();
 
-		$height  = max( 320, absint( $atts['height'] ) );
+		// height="fill" makes the widget take its container's height instead
+		// of a fixed one -- what an Elementor popup or a flex cell wants,
+		// where a pixel height just fights the box it was put in.
+		$fill    = 'fill' === strtolower( trim( (string) $atts['height'] ) );
+		$height  = $fill ? 0 : max( 320, absint( $atts['height'] ) );
 		$sidebar = in_array( strtolower( $atts['sidebar'] ), array( 'yes', 'true', '1' ), true );
 
 		$classes = 'law-agent-chat';
+		if ( $fill ) {
+			$classes .= ' is-fill';
+		}
 		if ( $sidebar ) {
 			$classes .= ' has-sidebar';
 		}
@@ -54,7 +61,7 @@ class Law_Agent_Shortcode {
 		<div class="<?php echo esc_attr( $classes ); ?>"
 			dir="rtl"
 			lang="ar"
-			style="--law-agent-height: <?php echo esc_attr( $height ); ?>px"
+			<?php if ( ! $fill ) : ?>style="--law-agent-height: <?php echo esc_attr( $height ); ?>px"<?php endif; ?>
 			data-law-agent-chat>
 
 			<?php if ( $sidebar ) : ?>
@@ -80,7 +87,16 @@ class Law_Agent_Shortcode {
 					<button type="button" class="la-book" data-la-book></button>
 				</div>
 
-				<form class="la-composer" data-la-composer>
+				<!--
+					onsubmit="return false" is a floor, not the mechanism: the
+					JS binds submit and calls preventDefault. But if it has not
+					mounted yet -- a popup that injected this markup before the
+					script ran, a JS error, an optimiser that mangled the file
+					-- a native submit reloads the page and loses the
+					conversation. A widget that fails should do nothing, not
+					destroy what the visitor was doing.
+				-->
+				<form class="la-composer" data-la-composer onsubmit="return false">
 					<textarea class="la-input" data-la-input rows="2"></textarea>
 					<button type="submit" class="la-send" data-la-send></button>
 				</form>
