@@ -93,6 +93,29 @@ def principal(authorization: str = Header(default="")) -> Principal:
 
 CurrentPrincipal = Depends(principal)
 
+# Roles that may read a client's conversation from the dashboard. Matches the
+# product backend's StaffGuard.
+STAFF_ROLES = ("owner", "admin")
+
+
+def staff_principal(authorization: str = Header(default="")) -> Principal:
+    """A verified member of staff, reading as themselves.
+
+    This is how the dashboard reads a transcript, and it is deliberately NOT
+    the admin key. The key is shared by services, cannot be attributed to a
+    person or revoked for one, and the service-to-service endpoints are
+    promised never to read a conversation. A staff token names who looked, and
+    dies in fifteen minutes.
+    """
+    p = principal(authorization)
+    if p.anonymous or p.role not in STAFF_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "forbidden",
+                    "message": "reading conversations requires an admin or owner role"},
+        )
+    return p
+
 
 def admin_key(x_admin_key: str = Header(default="")) -> None:
     """Authorization for the service-to-service endpoints.

@@ -95,10 +95,11 @@ def _prepare(
     session_id: str,
     content: str,
     client_message_id: str,
+    input_mode: str = "text",
 ) -> _Prepared:
     user_msg, created = repo.add_user_message(
         db, principal, session_id, content=content,
-        client_message_id=client_message_id,
+        client_message_id=client_message_id, input_mode=input_mode,
     )
     if not created:
         # Already answered: return the stored assistant turn rather than
@@ -107,6 +108,15 @@ def _prepare(
             m for m in repo.messages(db, principal, session_id)
             if m.role == "assistant" and m.seq > user_msg.seq
         ]
+        if prior and prior[0].status == "error":
+            # The earlier attempt failed, and its allowance was refunded when
+            # it did. A retry is a genuine new attempt: charge for it once and
+            # answer afresh. Replaying the failure — what used to happen,
+            # because retries reuse the client_message_id — showed the visitor
+            # the same broken answer however many times they pressed retry.
+            repo.discard_failed_answer(db, principal, prior[0].id)
+            repo.reserve_message(db, principal)
+            prior = []
         if prior:
             a = prior[0]
             return _Prepared(
@@ -210,17 +220,28 @@ def take_turn(
     session_id: str,
     content: str,
     client_message_id: str,
+    input_mode: str = "text",
 ) -> TurnResult:
     started = time.perf_counter()
     with scope() as db:
         prep = _prepare(db, principal, retriever, session_id, content,
-                        client_message_id)
+                        client_message_id, input_mode)
     if prep.reused is not None:
         return prep.reused
 
-    raw = bedrock_chat(
-        build_messages(content, list(prep.chunks), prep.dialogue),
-    )
+    try:
+        raw = bedrock_chat(
+            build_messages(content, list(prep.chunks), prep.dialogue),
+        )
+    except Exception as exc:
+        # Record the failure as an answer row, the same shape the streaming
+        # path leaves, so a retry recognises it; and give the allowance back.
+        with scope() as db:
+            _persist(db, principal, session_id, prep, text="", label=None,
+                     latency_ms=int((time.perf_counter() - started) * 1000),
+                     status="error", error_code=type(exc).__name__)
+            repo.refund_message(db, principal)
+        raise
     label, text = split_label(raw, bool(prep.chunks))
     latency = int((time.perf_counter() - started) * 1000)
 
@@ -244,6 +265,7 @@ def stream_turn(
     session_id: str,
     content: str,
     client_message_id: str,
+    input_mode: str = "text",
 ) -> Iterator[dict]:
     """Yields SSE-shaped events: meta, sources, token…, done | error.
 
@@ -255,7 +277,7 @@ def stream_turn(
     started = time.perf_counter()
     with scope() as db:
         prep = _prepare(db, principal, retriever, session_id, content,
-                        client_message_id)
+                        client_message_id, input_mode)
         if prep.reused is None:
             # Reserve the row now, empty and marked `streaming`. It gives the
             # client a message_id in the first event, and it means an answer
@@ -307,6 +329,8 @@ def stream_turn(
             _finish(db, principal, message_id, text=text, label=label,
                     latency_ms=int((time.perf_counter() - started) * 1000),
                     status="error", error_code=type(exc).__name__)
+            # An outage is not the visitor's message to lose.
+            repo.refund_message(db, principal)
         yield {"event": "error",
                "data": {"code": "upstream_unavailable", "message": str(exc)[:200]}}
         return

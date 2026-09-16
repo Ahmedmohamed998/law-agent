@@ -256,6 +256,54 @@ breaker for handing a conversation to a lawyer.
 
 ---
 
+### `GET /v1/usage` → 200
+
+```json
+{ "used": 3, "limit": 5, "remaining": 2, "anonymous": true, "registered_limit": 20 }
+```
+
+The caller's message allowance: 5 in total while anonymous, 20 in total once
+registered (the same user id carries across sign-up, so the 5 count towards
+the 20). Never resets. Staff (`owner`, `admin`, `lawyer`) get `limit: null`.
+
+A message over the limit is refused **before retrieval or the model runs**:
+`429 message_quota_exhausted` from the blocking endpoint, or an SSE `error`
+event with that code from the streaming one. A replayed `client_message_id`
+is never refused and never charged. An answer that fails upstream gives its
+message back, and retrying it with the same `client_message_id` answers
+afresh rather than replaying the failure.
+
+`POST` bodies accept `"input_mode": "text" | "voice"`; history rows return it.
+
+### `POST /v1/transcribe` → 200
+
+Body: `audio/wav`, 16 kHz (or 8 kHz) mono 16-bit PCM, at most 60 seconds.
+
+```json
+{ "text": "كم مدة الإجازة السنوية", "duration_seconds": 3.2 }
+```
+
+Stores nothing. The text goes back to the client to be reviewed and then sent
+as an ordinary message with `input_mode: "voice"`. Refused with 429 when no
+allowance remains. `415` wrong content type, `422 bad_audio` / `no_speech`,
+`503 speech_unavailable` when Transcribe fails or is not permitted.
+
+### `GET /v1/messages/{message_id}/audio` → 200 `audio/mpeg`
+
+A finished answer belonging to the caller, read aloud by Polly. Markdown is
+removed and tables are replaced with a one-line notice. `404
+message_not_found`, `503 speech_unavailable`.
+
+### `GET /v1/staff/sessions/{session_id}` → 200
+
+A conversation for the dashboard: messages with `input_mode` and
+`source_label`, `voice_messages`, and the owner's `messages_used` /
+`message_limit`. Requires an **`owner` or `admin` token** — the product
+backend forwards the operator's own. The admin key is not accepted here: the
+service-to-service endpoints below still cannot read a conversation.
+
+---
+
 ## 5b. Service-to-service endpoints
 
 Two endpoints the *other* services call. They authenticate with a shared header

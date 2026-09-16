@@ -43,6 +43,7 @@ MESSAGE_STATUSES = ("streaming", "complete", "error")
 # want to count them separately when deciding which documents to add next.
 SOURCE_LABELS = ("documents", "model_knowledge", "mixed", "refused", "escalate")
 FEEDBACK_RATINGS = ("up", "down")
+INPUT_MODES = ("text", "voice")
 
 
 def _in(column: str, allowed: tuple[str, ...]) -> str:
@@ -112,6 +113,7 @@ class Message(Base):
         ),
         CheckConstraint(_in("role", MESSAGE_ROLES), name="ck_messages_role"),
         CheckConstraint(_in("status", MESSAGE_STATUSES), name="ck_messages_status"),
+        CheckConstraint(_in("input_mode", INPUT_MODES), name="ck_messages_input_mode"),
         CheckConstraint(
             f"source_label IS NULL OR {_in('source_label', SOURCE_LABELS)}",
             name="ck_messages_source_label",
@@ -133,6 +135,9 @@ class Message(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     client_message_id: Mapped[str | None] = mapped_column(String(64))
+    # Typed or spoken. Informational: the turn is answered identically either
+    # way, which is why it is safe to take from the client.
+    input_mode: Mapped[str] = mapped_column(String(8), nullable=False, default="text")
 
     # Denormalised from the session so tenant filtering never needs a join —
     # a policy that can be evaluated on the row itself is one that cannot be
@@ -206,3 +211,25 @@ class Feedback(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     organization_id: Mapped[str | None] = mapped_column(String(128))
+
+
+class MessageUsage(Base):
+    """How many messages a user has sent, across every conversation.
+
+    A counter rather than a COUNT over messages: deleting a conversation is a
+    soft delete, and a limit derived from visible messages is one anyone can
+    reset by deleting a chat. See migration 0002 for the atomicity argument.
+    """
+
+    __tablename__ = "message_usage"
+    __table_args__ = (
+        CheckConstraint("messages_used >= 0", name="ck_message_usage_nonneg"),
+        {"schema": SCHEMA},
+    )
+
+    user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    org_key: Mapped[str] = mapped_column(String(128), primary_key=True, default="")
+    messages_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

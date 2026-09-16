@@ -9,7 +9,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-SourceLabel = Literal["documents", "model_knowledge", "mixed", "refused"]
+# Must list every label the model can emit and the database accepts. `escalate`
+# was missing, so any conversation where someone asked to book failed
+# validation on reload and the history endpoint answered 500.
+SourceLabel = Literal["documents", "model_knowledge", "mixed", "refused", "escalate"]
+InputMode = Literal["text", "voice"]
 
 
 class CreateSession(BaseModel):
@@ -31,6 +35,8 @@ class PostMessage(BaseModel):
     # double-clicks, and without a key that costs a duplicate Azure call and a
     # duplicate row.
     client_message_id: str = Field(min_length=6, max_length=64)
+    # Whether the text came from a recording. Informational only.
+    input_mode: InputMode = "text"
 
 
 class SourceOut(BaseModel):
@@ -48,6 +54,7 @@ class MessageOut(BaseModel):
     source_label: SourceLabel | None = None
     sources: list[SourceOut] = []
     created_at: datetime | None = None
+    input_mode: InputMode = "text"
 
 
 class AnswerOut(BaseModel):
@@ -62,6 +69,50 @@ class AnswerOut(BaseModel):
 class FeedbackIn(BaseModel):
     rating: Literal["up", "down"]
     reason: str | None = Field(default=None, max_length=2000)
+
+
+class UsageOut(BaseModel):
+    used: int
+    # None means unlimited (staff).
+    limit: int | None
+    remaining: int | None
+    anonymous: bool
+    # What a registered account allows in total. Lets the widget tell an
+    # anonymous visitor at their limit how many more signing in would give.
+    registered_limit: int
+
+
+class TranscriptOut(BaseModel):
+    text: str
+    duration_seconds: float
+
+
+class AdminMessageOut(BaseModel):
+    """A transcript row for staff. No sources: the dashboard shows the
+    conversation, not retrieval diagnostics."""
+
+    seq: int
+    role: str
+    content: str
+    source_label: str | None = None
+    input_mode: str = "text"
+    status: str
+    created_at: datetime | None = None
+
+
+class AdminSessionOut(BaseModel):
+    session_id: str
+    user_id: str
+    status: str
+    lang: str | None
+    title: str | None
+    created_at: datetime
+    messages: list[AdminMessageOut]
+    voice_messages: int
+    messages_used: int
+    # The registered allowance. Paying clients are always registered, so this
+    # is the limit that applies to anyone whose case reaches the dashboard.
+    message_limit: int
 
 
 class ErrorBody(BaseModel):

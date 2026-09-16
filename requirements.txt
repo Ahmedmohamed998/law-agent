@@ -14,3 +14,6 @@ pydantic-settings==2.14.2
 PyJWT[crypto]==2.12.1
 sqlalchemy==2.0.45
 uvicorn[standard]==0.52.1
+
+# voice: streaming speech-to-text. Polly (speech out) is already in boto3.
+amazon-transcribe==0.6.2

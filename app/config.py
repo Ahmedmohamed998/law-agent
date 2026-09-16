@@ -71,6 +71,35 @@ class Settings(BaseSettings):
     # erasure endpoint is worse than a missing one.
     admin_api_key: str = ""
 
+    # -- message allowance -------------------------------------------------
+    # Totals per user, across every conversation, never reset. An anonymous
+    # visitor who signs up keeps the same user id, so what they sent before
+    # counts towards the registered total — 5 then 15 more is a total of 20.
+    #
+    # Staff roles are exempt: a lawyer reviewing a case must not be locked out
+    # of the tool by their own testing.
+    anon_message_limit: int = 5
+    registered_message_limit: int = 20
+    unlimited_roles: tuple[str, ...] = ("owner", "admin", "lawyer")
+
+    # -- voice -------------------------------------------------------------
+    # Speech in (Amazon Transcribe streaming) and speech out (Amazon Polly),
+    # using the same IAM credentials as embeddings. Region is separate from
+    # Bedrock's so either can move without the other.
+    speech_region: str = "us-east-1"
+    transcribe_language: str = "ar-SA"
+    # Longest recording accepted. The widget stops at the same length; this is
+    # the backstop against a client that does not.
+    voice_max_seconds: int = 60
+    # Zeina (standard engine) is the Arabic voice available everywhere Polly
+    # is. Try Hala with the neural engine for a Gulf accent once it is
+    # confirmed in this region. The model answers in the question's language,
+    # so English answers get an English voice.
+    polly_voice_id: str = "Zeina"
+    polly_engine: str = "standard"
+    polly_voice_id_en: str = "Joanna"
+    polly_engine_en: str = "standard"
+
     # -- cors --------------------------------------------------------------
     # The frontend calls this service directly for chat, because proxying SSE
     # buffers it — so CORS is ours to get right. Configurable because the real

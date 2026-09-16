@@ -21,13 +21,16 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from app.api.auth import admin_key
+from app.api.auth import admin_key, staff_principal
 from app.api.auth import principal as current_principal
 from app.api.schemas import (
+    AdminMessageOut,
+    AdminSessionOut,
     AnswerOut,
     CreateSession,
     FeedbackIn,
@@ -35,14 +38,18 @@ from app.api.schemas import (
     PostMessage,
     SessionOut,
     SourceOut,
+    TranscriptOut,
+    UsageOut,
 )
 from app.chat import stream_turn, take_turn
 from app.config import settings
 from app.db import repository as repo
-from app.db.repository import NotFound, SessionEscalated
+from app.db.repository import NotFound, QuotaExhausted, SessionEscalated
 from app.db.session import Principal, admin_session, engine, scoped_session
 from app.rag.retriever import Retriever
 from app.rag.summarize import summarize_escalation
+from app.voice.speech import SpeechUnavailable, audio_cache, synthesize, transcribe
+from app.voice.text import BadAudio, read_wav
 
 log = logging.getLogger("law_agent.api")
 
@@ -125,6 +132,17 @@ def _escalated(request: Request, exc: SessionEscalated):
                   "this conversation has been handed to a lawyer")
 
 
+_QUOTA_MESSAGE = "message allowance exhausted"
+
+
+@app.exception_handler(QuotaExhausted)
+def _quota(request: Request, exc: QuotaExhausted):
+    # 429, raised before retrieval and before the model: a refused message
+    # costs nothing. The widget decides what to offer from whether the caller
+    # is anonymous (sign in) or not (a paid service), which it already knows.
+    return _error(429, "message_quota_exhausted", _QUOTA_MESSAGE)
+
+
 def retriever(request: Request) -> Retriever:
     return request.app.state.retriever
 
@@ -200,6 +218,7 @@ def history(session_id: str, p: Principal = Depends(current_principal)):
             MessageOut(
                 message_id=m.id, seq=m.seq, role=m.role, content=m.content,
                 source_label=m.source_label, created_at=m.created_at,
+                input_mode=m.input_mode or "text",
                 sources=[
                     SourceOut(citation=s.citation, doc_title=s.doc_title,
                               article_label=s.article_label, reason=s.reason)
@@ -223,7 +242,7 @@ def post_message(
     result = take_turn(
         functools.partial(scoped_session, p), p, r,
         session_id=session_id, content=body.content,
-        client_message_id=body.client_message_id,
+        client_message_id=body.client_message_id, input_mode=body.input_mode,
     )
     return AnswerOut(
         message_id=result.message_id, seq=result.seq, content=result.content,
@@ -245,6 +264,7 @@ def post_message_stream(
                 functools.partial(scoped_session, p), p, r,
                 session_id=session_id, content=body.content,
                 client_message_id=body.client_message_id,
+                input_mode=body.input_mode,
             ):
                 yield (
                     f"event: {ev['event']}\n"
@@ -255,6 +275,8 @@ def post_message_stream(
         except SessionEscalated:
             yield _sse_error("session_escalated",
                              "this conversation has been handed to a lawyer")
+        except QuotaExhausted:
+            yield _sse_error("message_quota_exhausted", _QUOTA_MESSAGE)
         except Exception as exc:  # never leave the client waiting on a dead stream
             log.exception("stream failed")
             yield _sse_error("internal_error", str(exc)[:200])
@@ -292,6 +314,174 @@ def feedback(message_id: str, body: FeedbackIn,
 def escalate(session_id: str, p: Principal = Depends(current_principal)):
     with scoped_session(p) as db:
         repo.escalate(db, p, session_id)
+
+
+# ── message allowance ─────────────────────────────────────────────────────
+
+
+@app.get("/v1/usage", response_model=UsageOut)
+def usage(p: Principal = Depends(current_principal)):
+    """How much of their allowance the caller has left, for the widget's counter."""
+    with scoped_session(p) as db:
+        used, limit = repo.message_usage(db, p)
+    return UsageOut(
+        used=used,
+        limit=limit,
+        remaining=None if limit is None else max(0, limit - used),
+        anonymous=p.anonymous,
+        registered_limit=settings().registered_message_limit,
+    )
+
+
+# ── voice ─────────────────────────────────────────────────────────────────
+
+# 60 s of 16 kHz mono 16-bit PCM is 1.92 MB; a little headroom for the header,
+# no more. nginx enforces a matching cap in front of this.
+_MAX_AUDIO_BYTES = 2_200_000
+
+
+def _remaining(p: Principal) -> int | None:
+    with scoped_session(p) as db:
+        used, limit = repo.message_usage(db, p)
+    return None if limit is None else max(0, limit - used)
+
+
+@app.post("/v1/transcribe", response_model=TranscriptOut)
+async def transcribe_recording(request: Request, p: Principal = Depends(current_principal)):
+    """A recording in, its text out. Stores nothing.
+
+    Separate from sending a message on purpose. The text comes back to the
+    widget, the visitor sees what was heard and can correct it, and only then
+    does it go through the ordinary message path: the same allowance, the same
+    idempotency, the same retrieval. A mis-heard legal question answered unseen
+    is worse than one extra tap.
+
+    `async`, unlike the rest of this file: the Transcribe SDK is asyncio-native,
+    and the one blocking call (the allowance lookup) runs in the threadpool.
+    """
+    remaining = await run_in_threadpool(_remaining, p)
+    if remaining == 0:
+        # Transcription costs money too. No allowance, no transcription.
+        raise QuotaExhausted(anonymous=p.anonymous, limit=0, used=0)
+
+    content_type = request.headers.get("content-type", "").split(";")[0].strip()
+    if content_type not in ("audio/wav", "audio/x-wav", "audio/wave"):
+        raise HTTPException(
+            status_code=415,
+            detail={"code": "unsupported_audio", "message": "send audio/wav"},
+        )
+
+    body = await request.body()
+    if len(body) > _MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "audio_too_large", "message": "recording too long"},
+        )
+
+    try:
+        pcm = read_wav(body, max_seconds=settings().voice_max_seconds)
+    except BadAudio as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "bad_audio", "message": str(exc)}
+        ) from exc
+
+    try:
+        text = await transcribe(pcm)
+    except SpeechUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "speech_unavailable", "message": str(exc)},
+        ) from exc
+
+    if not text:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "no_speech", "message": "nothing intelligible was said"},
+        )
+    return TranscriptOut(text=text, duration_seconds=round(pcm.seconds, 1))
+
+
+@app.get("/v1/messages/{message_id}/audio")
+def message_audio(message_id: str, p: Principal = Depends(current_principal)):
+    """An answer read aloud, as MP3.
+
+    Only finished answers that belong to the caller. It reads the stored text
+    and generates nothing new, so it cannot say what the page does not.
+    """
+    try:
+        with scoped_session(p) as db:
+            content = repo.get_answer(db, p, message_id).content
+    except NotFound:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "message_not_found", "message": "no such answer"},
+        ) from None
+
+    s = settings()
+    key = f"{message_id}:{s.polly_voice_id}:{s.polly_engine}"
+    audio = audio_cache.get(key)
+    if audio is None:
+        try:
+            audio = synthesize(content)
+        except SpeechUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "speech_unavailable", "message": str(exc)},
+            ) from exc
+        if not audio:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "nothing_to_read",
+                        "message": "answer has no speakable text"},
+            )
+        audio_cache.put(key, audio)
+    # No Cache-Control: nginx sets no-store on this host, and a second header
+    # would contradict it. The widget keeps its own copy for the page view.
+    return Response(content=audio, media_type="audio/mpeg")
+
+
+# ── staff ─────────────────────────────────────────────────────────────────
+
+
+@app.get("/v1/staff/sessions/{session_id}", response_model=AdminSessionOut)
+def staff_session(session_id: str, p: Principal = Depends(staff_principal)):
+    """A client's conversation, for the dashboard.
+
+    Authorized by the staff member's own token, forwarded by the product
+    backend. Never by the admin key: the service-to-service endpoints below
+    promise they cannot read a conversation, and that promise stays true.
+
+    Cross-tenant through admin_session, because the reader (a firm admin) and
+    the client (no organization) are in different tenants. Correct while this
+    deployment serves one firm; a second firm would need the case to carry the
+    firm, and this check to compare against it.
+    """
+    with admin_session() as db:
+        session, rows, used = repo.session_for_staff(db, session_id)
+        out = AdminSessionOut(
+            session_id=session.id,
+            user_id=session.user_id,
+            status=session.status,
+            lang=session.lang,
+            title=session.title,
+            created_at=session.created_at,
+            messages=[
+                AdminMessageOut(
+                    seq=m.seq, role=m.role, content=m.content,
+                    source_label=m.source_label,
+                    input_mode=m.input_mode or "text",
+                    status=m.status, created_at=m.created_at,
+                )
+                for m in rows
+            ],
+            voice_messages=sum(
+                1 for m in rows if m.role == "user" and m.input_mode == "voice"
+            ),
+            messages_used=used,
+            message_limit=settings().registered_message_limit,
+        )
+    log.info("staff read session=%s by=%s", session_id, p.user_id)
+    return out
 
 
 # ── service-to-service ────────────────────────────────────────────────────

@@ -8,12 +8,14 @@ each call site. Row-level security is the second line; this is the first.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as SASession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Feedback, Message, MessageSource, Session
+from app.config import settings
+from app.db.models import Feedback, Message, MessageSource, MessageUsage, Session
 from app.db.session import Principal
 
 
@@ -23,6 +25,16 @@ class NotFound(Exception):
 
 class SessionEscalated(Exception):
     """The session was handed to a lawyer; the model must not answer on it."""
+
+
+class QuotaExhausted(Exception):
+    """The user has sent every message their allowance permits."""
+
+    def __init__(self, *, anonymous: bool, limit: int, used: int):
+        super().__init__(f"message allowance exhausted ({used}/{limit})")
+        self.anonymous = anonymous
+        self.limit = limit
+        self.used = used
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +140,144 @@ def recent_turns(
     return list(reversed(rows))
 
 
+# ── message allowance ─────────────────────────────────────────────────────
+
+
+def message_limit(principal: Principal) -> int | None:
+    """The total this caller may send. None means unlimited."""
+    s = settings()
+    if not principal.anonymous and principal.role in s.unlimited_roles:
+        return None
+    return s.anon_message_limit if principal.anonymous else s.registered_message_limit
+
+
+def _usage_table():
+    return MessageUsage.__table__
+
+
+def message_usage(db: SASession, principal: Principal) -> tuple[int, int | None]:
+    """(used, limit) for this caller."""
+    t = _usage_table()
+    used = db.scalar(
+        select(t.c.messages_used).where(
+            t.c.user_id == principal.user_id, t.c.org_key == principal.org_key
+        )
+    )
+    return int(used or 0), message_limit(principal)
+
+
+def reserve_message(db: SASession, principal: Principal) -> int:
+    """Consume one message of allowance, or raise QuotaExhausted.
+
+    One conditional UPDATE is the whole check. Two tabs sending at once both
+    reach it; Postgres serialises them on the row lock and re-evaluates the
+    WHERE for the second, so the limit cannot be overshot by a race the way a
+    read-then-write would allow.
+    """
+    t = _usage_table()
+    limit = message_limit(principal)
+
+    db.execute(
+        pg_insert(t)
+        .values(user_id=principal.user_id, org_key=principal.org_key, messages_used=0)
+        .on_conflict_do_nothing(index_elements=["user_id", "org_key"])
+    )
+
+    stmt = update(t).where(
+        t.c.user_id == principal.user_id, t.c.org_key == principal.org_key
+    )
+    if limit is not None:
+        stmt = stmt.where(t.c.messages_used < limit)
+    used = db.scalar(
+        stmt.values(messages_used=t.c.messages_used + 1, updated_at=func.now())
+        .returning(t.c.messages_used)
+    )
+    if used is None:
+        current, _ = message_usage(db, principal)
+        raise QuotaExhausted(
+            anonymous=principal.anonymous, limit=limit or 0, used=current
+        )
+    return int(used)
+
+
+def refund_message(db: SASession, principal: Principal) -> None:
+    """Give one back. For answers that failed: a visitor should not lose
+    allowance to an outage they had no part in."""
+    t = _usage_table()
+    db.execute(
+        update(t)
+        .where(
+            t.c.user_id == principal.user_id,
+            t.c.org_key == principal.org_key,
+            t.c.messages_used > 0,
+        )
+        .values(messages_used=t.c.messages_used - 1, updated_at=func.now())
+    )
+
+
+def get_answer(db: SASession, principal: Principal, message_id: str) -> Message:
+    """A finished assistant message belonging to this caller, or NotFound."""
+    row = db.scalar(
+        select(Message)
+        .join(Session, Session.id == Message.session_id)
+        .where(
+            Message.id == message_id,
+            Message.role == "assistant",
+            Message.status == "complete",
+            Session.user_id == principal.user_id,
+            Session.deleted_at.is_(None),
+        )
+    )
+    if row is None:
+        raise NotFound(message_id)
+    return row
+
+
+def session_for_staff(db: SASession, session_id: str) -> tuple[Session, list[Message], int]:
+    """A conversation and its owner's message count, for the dashboard.
+
+    Cross-tenant, like escalate_any: the reader is staff looking at a client's
+    case, and the client has no organization. Includes soft-deleted
+    conversations — a client deleting a chat does not remove it from a case a
+    lawyer has already been paid to take.
+    """
+    session = db.scalar(select(Session).where(Session.id == session_id))
+    if session is None:
+        raise NotFound(session_id)
+    rows = list(
+        db.scalars(
+            select(Message)
+            .where(Message.session_id == session_id)
+            .order_by(Message.seq)
+        )
+    )
+    t = _usage_table()
+    used = db.scalar(
+        select(t.c.messages_used).where(
+            t.c.user_id == session.user_id,
+            t.c.org_key == (session.organization_id or ""),
+        )
+    )
+    return session, rows, int(used or 0)
+
+
+def discard_failed_answer(db: SASession, principal: Principal, message_id: str) -> None:
+    """Remove an assistant row whose generation failed, so a retry can answer
+    afresh instead of replaying the failure."""
+    row = db.scalar(
+        select(Message)
+        .join(Session, Session.id == Message.session_id)
+        .where(
+            Message.id == message_id,
+            Message.status == "error",
+            Session.user_id == principal.user_id,
+        )
+    )
+    if row is not None:
+        db.delete(row)
+        db.flush()
+
+
 # ── writing a turn ────────────────────────────────────────────────────────
 
 
@@ -150,6 +300,7 @@ def add_user_message(
     *,
     content: str,
     client_message_id: str,
+    input_mode: str = "text",
 ) -> tuple[Message, bool]:
     """Append the user's turn. Returns (message, created).
 
@@ -168,7 +319,15 @@ def add_user_message(
         )
     )
     if existing is not None:
+        # A replay is not a new message: it returns an answer already paid
+        # for, so it must neither consume allowance nor be refused for lack
+        # of it.
         return existing, False
+
+    # Checked here, beside the escalation guard and before anything costs
+    # money. Raises QuotaExhausted; the increment rolls back with the rest of
+    # the transaction if the insert below loses a race.
+    reserve_message(db, principal)
 
     row = Message(
         session_id=session_id,
@@ -177,6 +336,7 @@ def add_user_message(
         role="user",
         content=content,
         client_message_id=client_message_id,
+        input_mode=input_mode if input_mode in ("text", "voice") else "text",
     )
     db.add(row)
     try:
@@ -359,4 +519,6 @@ def purge_user(db: SASession, user_id: str) -> int:
     rows = list(db.scalars(select(Session).where(Session.user_id == user_id)))
     for row in rows:
         db.delete(row)  # messages -> sources/feedback cascade on delete
+    t = _usage_table()
+    db.execute(t.delete().where(t.c.user_id == user_id))
     return len(rows)
