@@ -96,8 +96,13 @@ class Law_Agent_Shortcode {
 					conversation. A widget that fails should do nothing, not
 					destroy what the visitor was doing.
 				-->
+				<!-- Messages left. Hidden for staff, who are unlimited. -->
+				<div class="la-usage" data-la-usage hidden aria-live="polite"></div>
+
 				<form class="la-composer" data-la-composer onsubmit="return false">
 					<textarea class="la-input" data-la-input rows="2"></textarea>
+					<!-- type="button": pressing it must never submit the form. -->
+					<button type="button" class="la-mic" data-la-mic hidden></button>
 					<button type="submit" class="la-send" data-la-send></button>
 				</form>
 			</div>

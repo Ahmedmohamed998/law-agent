@@ -61,7 +61,21 @@
 		errEmailTaken: 'هذا البريد الإلكتروني مستخدم بالفعل.',
 		errOpenConsult: 'لديك استشارة قيد التنفيذ بالفعل.',
 		errUnconfigured: 'لم يتم إعداد المساعد بعد.',
-		retry: 'إعادة المحاولة'
+		retry: 'إعادة المحاولة',
+		remaining: 'الرسائل المتبقية: %s',
+		quotaAnonTitle: 'انتهت رسائلك المجانية',
+		quotaAnonBody: 'سجّل دخولك لتحصل على %s رسالة إضافية.',
+		quotaUserTitle: 'وصلت إلى الحد الأقصى من الرسائل',
+		quotaUserBody: 'لمتابعة حالتك، يمكنك حجز استشارة مع محامٍ.',
+		micStart: 'تسجيل صوتي',
+		micStop: 'إيقاف التسجيل',
+		transcribing: 'جارٍ تحويل الصوت إلى نص…',
+		micDenied: 'لم نتمكن من الوصول إلى الميكروفون. اسمح بالوصول من إعدادات المتصفح.',
+		noSpeech: 'لم نسمع كلامًا واضحًا. حاول مرة أخرى.',
+		speechDown: 'خدمة الصوت غير متاحة حاليًا. اكتب سؤالك بدلًا من ذلك.',
+		listen: 'استمع',
+		stopListening: 'إيقاف',
+		loadingAudio: 'جارٍ التحميل…'
 	};
 
 	var T = (function () {
@@ -127,6 +141,8 @@
 		if (code === 'unauthenticated') return T.errAuth;
 		if (code === 'email_taken' || err.status === 409) return T.errOpenConsult;
 		if (code === 'network') return T.errNetwork;
+		if (code === 'no_speech' || code === 'bad_audio') return T.noSpeech;
+		if (code === 'speech_unavailable') return T.speechDown;
 		return T.errGeneric;
 	}
 
@@ -470,6 +486,124 @@
 
 	/* ── the widget ───────────────────────────────────────────────────── */
 
+	/* ── voice recording ──────────────────────────────────────────────────
+	 * Records 16 kHz mono 16-bit PCM and wraps it as WAV, in the browser.
+	 *
+	 * Not MediaRecorder: that produces WebM in Chrome, MP4 in Safari and Ogg
+	 * in Firefox, none of which Transcribe streaming takes without the server
+	 * running ffmpeg. Raw PCM is the one format every browser can produce
+	 * through Web Audio and the service can use as it arrives.
+	 */
+	function Recorder() {}
+
+	Recorder.supported = function () {
+		return !!(
+			window.isSecureContext &&
+			navigator.mediaDevices &&
+			navigator.mediaDevices.getUserMedia &&
+			(window.AudioContext || window.webkitAudioContext)
+		);
+	};
+
+	Recorder.prototype.start = function () {
+		var self = this;
+		return navigator.mediaDevices.getUserMedia({
+			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+		}).then(function (stream) {
+			var Ctx = window.AudioContext || window.webkitAudioContext;
+			self.stream = stream;
+			self.ctx = new Ctx();
+			self.rate = self.ctx.sampleRate;
+			self.chunks = [];
+			self.samples = 0;
+			self.source = self.ctx.createMediaStreamSource(stream);
+			// ScriptProcessor is deprecated but works everywhere, unlike an
+			// AudioWorklet, which needs a separate module file served with the
+			// right headers from inside somebody else's WordPress theme.
+			self.node = self.ctx.createScriptProcessor(4096, 1, 1);
+			self.node.onaudioprocess = function (e) {
+				var data = e.inputBuffer.getChannelData(0);
+				self.chunks.push(new Float32Array(data));
+				self.samples += data.length;
+			};
+			self.source.connect(self.node);
+			// Chrome only fires onaudioprocess when the node reaches the
+			// destination. Nothing is written to the output, so nothing plays.
+			self.node.connect(self.ctx.destination);
+		});
+	};
+
+	Recorder.prototype.seconds = function () {
+		return this.rate ? this.samples / this.rate : 0;
+	};
+
+	/** Stop, release the microphone, and return a WAV Blob. */
+	Recorder.prototype.stop = function () {
+		try { this.source.disconnect(); } catch (e) { /* already gone */ }
+		try { this.node.disconnect(); } catch (e) { /* already gone */ }
+		if (this.stream) {
+			// Releasing the tracks is what turns the browser's recording
+			// indicator off. Leaving it lit looks like we are still listening.
+			this.stream.getTracks().forEach(function (t) { t.stop(); });
+		}
+		if (this.ctx && this.ctx.close) this.ctx.close();
+
+		var merged = new Float32Array(this.samples);
+		var offset = 0;
+		this.chunks.forEach(function (c) { merged.set(c, offset); offset += c.length; });
+		return encodeWav(downsample(merged, this.rate, 16000), 16000);
+	};
+
+	function downsample(buffer, inRate, outRate) {
+		if (outRate >= inRate) return buffer;
+		var ratio = inRate / outRate;
+		var out = new Float32Array(Math.floor(buffer.length / ratio));
+		var pos = 0;
+		for (var i = 0; i < out.length; i++) {
+			// Average the input samples this output sample covers: a cheap
+			// low-pass, enough to keep speech from aliasing.
+			var next = Math.floor((i + 1) * ratio);
+			var sum = 0;
+			var count = 0;
+			for (; pos < next && pos < buffer.length; pos++) {
+				sum += buffer[pos];
+				count++;
+			}
+			out[i] = count ? sum / count : 0;
+		}
+		return out;
+	}
+
+	function encodeWav(samples, rate) {
+		var view = new DataView(new ArrayBuffer(44 + samples.length * 2));
+		function text(offset, str) {
+			for (var i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+		}
+		text(0, 'RIFF');
+		view.setUint32(4, 36 + samples.length * 2, true);
+		text(8, 'WAVE');
+		text(12, 'fmt ');
+		view.setUint32(16, 16, true);   // PCM header size
+		view.setUint16(20, 1, true);    // PCM
+		view.setUint16(22, 1, true);    // mono
+		view.setUint32(24, rate, true);
+		view.setUint32(28, rate * 2, true);
+		view.setUint16(32, 2, true);
+		view.setUint16(34, 16, true);
+		text(36, 'data');
+		view.setUint32(40, samples.length * 2, true);
+		for (var i = 0, o = 44; i < samples.length; i++, o += 2) {
+			var v = Math.max(-1, Math.min(1, samples[i]));
+			view.setInt16(o, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+		}
+		return new Blob([view], { type: 'audio/wav' });
+	}
+
+	function formatSeconds(total) {
+		var s = Math.floor(total);
+		return Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
+	}
+
 	function Widget(root) {
 		this.root = root;
 		this.thread = root.querySelector('[data-la-thread]');
@@ -481,10 +615,22 @@
 		this.newBtn = root.querySelector('[data-la-new]');
 		this.bookBar = root.querySelector('[data-la-bookbar]');
 		this.bookBtn = root.querySelector('[data-la-book]');
+		this.micBtn = root.querySelector('[data-la-mic]');
+		this.usageEl = root.querySelector('[data-la-usage]');
 
 		this.sessionId = null;
 		this.locked = false;
 		this.pending = null; // { text, clientMessageId } -- survives a retry
+		// Allowance. `quotaReached` outlives a single conversation: starting a
+		// new chat must not quietly unlock a visitor who has used everything.
+		this.usage = null;
+		this.quotaReached = false;
+		// Voice.
+		this.recorder = null;
+		this.recordTimer = null;
+		this.voiceDraft = false; // the input holds a transcript
+		this.audio = null;       // { messageId, el, url, button }
+		this.audioUrls = {};
 
 		this.applyStrings();
 		this.wire();
@@ -496,6 +642,13 @@
 		this.input.setAttribute('aria-label', T.placeholder);
 		this.sendBtn.textContent = T.send;
 		if (this.newBtn) this.newBtn.textContent = '+ ' + T.newChat;
+		if (this.micBtn) {
+			this.micBtn.setAttribute('aria-label', T.micStart);
+			this.micBtn.title = T.micStart;
+			// Only where it can work: a secure page, a browser with Web
+			// Audio, and voice switched on in the plugin settings.
+			this.micBtn.hidden = !(CFG.voiceEnabled && Recorder.supported());
+		}
 
 		// Revealed only when consultations are actually configured, so the
 		// widget never offers something that cannot be bought.
@@ -526,7 +679,14 @@
 			// A new user action gets a new id. A retry of THIS action reuses
 			// it -- regenerating on retry is what defeats idempotency and
 			// pays for the same answer twice.
-			self.pending = { text: text, clientMessageId: uuid() };
+			self.pending = {
+				text: text,
+				clientMessageId: uuid(),
+				// Spoken, even if the visitor corrected a word before sending:
+				// the question still started as speech.
+				inputMode: self.voiceDraft ? 'voice' : 'text'
+			};
+			self.voiceDraft = false;
 			self.send(self.pending);
 		});
 
@@ -540,6 +700,20 @@
 				}
 			}
 		});
+
+		this.input.addEventListener('input', function () {
+			if (!self.input.value.trim()) self.voiceDraft = false;
+		});
+
+		if (this.micBtn) {
+			this.micBtn.addEventListener('click', function () {
+				if (self.recorder) {
+					self.stopRecording();
+				} else {
+					self.startRecording();
+				}
+			});
+		}
 
 		if (this.bookBtn) {
 			this.bookBtn.addEventListener('click', function () {
@@ -556,6 +730,8 @@
 				self.thread.innerHTML = '';
 				self.setLocked(false);
 				self.greet();
+				// Clearing the thread removed the notice, not the limit.
+				if (self.quotaReached) self.showQuotaPanel();
 				self.loadSessions();
 			});
 		}
@@ -570,6 +746,10 @@
 		}
 		Auth.ensure().then(
 			function () {
+				// After Auth.ensure, which may have just swapped an anonymous
+				// token for a signed-in one: a visitor back from logging in
+				// must see their new allowance, not the exhausted old one.
+				self.refreshUsage();
 				var stored = read(SESSION_KEY);
 				if (stored && stored.id) {
 					return self.open(stored.id).catch(function () {
@@ -597,10 +777,14 @@
 	};
 
 	Widget.prototype.setLocked = function (locked) {
-		this.locked = locked;
-		this.input.disabled = locked;
-		this.sendBtn.disabled = locked;
-		this.root.classList.toggle('is-locked', locked);
+		// Every caller that unlocks after a turn would otherwise undo the
+		// allowance lock, so it is applied here rather than remembered there.
+		var effective = locked || this.quotaReached;
+		this.locked = effective;
+		this.input.disabled = effective;
+		this.sendBtn.disabled = effective;
+		if (this.micBtn) this.micBtn.disabled = effective && !this.recorder;
+		this.root.classList.toggle('is-locked', effective);
 	};
 
 	Widget.prototype.scroll = function () {
@@ -645,8 +829,9 @@
 				(messages || []).slice().sort(function (a, b) {
 					return a.seq - b.seq;
 				}).forEach(function (m) {
-					var node = self.renderMessage(m.role, m.content, m.source_label);
+					var node = self.renderMessage(m.role, m.content, m.source_label, m.input_mode);
 					if (m.sources && m.sources.length) self.addSources(node, m.sources);
+					if (m.role === 'assistant' && m.content) self.addListen(node, m.message_id);
 					if (m.role === 'assistant' && m.source_label === 'refused') {
 						self.addConsultationCta(node);
 					}
@@ -659,8 +844,8 @@
 		);
 	};
 
-	Widget.prototype.renderMessage = function (role, content, sourceLabel) {
-		var node = el('div', 'la-msg ' + role);
+	Widget.prototype.renderMessage = function (role, content, sourceLabel, inputMode) {
+		var node = el('div', 'la-msg ' + role + (inputMode === 'voice' ? ' is-voice' : ''));
 		var bubble = el('div', 'la-bubble');
 		var md = el('div', 'la-md');
 
@@ -718,7 +903,7 @@
 	Widget.prototype.send = function (action) {
 		var self = this;
 		this.setLocked(true);
-		this.renderMessage('user', action.text);
+		var userNode = this.renderMessage('user', action.text, null, action.inputMode);
 
 		var bubble = this.renderMessage('assistant', '');
 		var target = bubble.querySelector('.la-md');
@@ -737,7 +922,8 @@
 					headers: Auth.headers(),
 					body: JSON.stringify({
 						content: action.text,
-						client_message_id: action.clientMessageId
+						client_message_id: action.clientMessageId,
+						input_mode: action.inputMode || 'text'
 					})
 				});
 			})
@@ -755,12 +941,19 @@
 			})
 			.then(function () {
 				bubble.classList.remove('is-streaming');
+				if (state.errorCode === 'message_quota_exhausted') {
+					return self.onQuotaExhausted(action, userNode, bubble);
+				}
 				self.pending = null;
 				self.setLocked(false);
+				self.refreshUsage();
 				return self.loadSessions();
 			})
 			.catch(function (err) {
 				bubble.classList.remove('is-streaming');
+				if (err.code === 'message_quota_exhausted') {
+					return self.onQuotaExhausted(action, userNode, bubble);
+				}
 				self.failure(target, state, err);
 				// An escalated conversation is over for the model: no retry.
 				if (err.code === 'session_escalated') {
@@ -823,6 +1016,11 @@
 	};
 
 	Widget.prototype.handle = function (event, data, bubble, target, state) {
+		if (event === 'meta') {
+			state.messageId = data.message_id;
+			return;
+		}
+
 		if (event === 'token') {
 			// The delta is the new tail only. Append, never replace.
 			state.raw += data.delta;
@@ -853,11 +1051,16 @@
 			if (data.source_label === 'refused') {
 				this.addConsultationCta(bubble);
 			}
+			if (state.raw) this.addListen(bubble, state.messageId);
 			this.scroll();
 			return;
 		}
 
 		if (event === 'error') {
+			state.errorCode = data.code;
+			// Refused before anything was stored: send() removes the bubbles
+			// and explains, so there is no failure to render here.
+			if (data.code === 'message_quota_exhausted') return;
 			this.failure(target, state, new ApiError(data.code, data.message, 0));
 			if (data.code === 'session_escalated') this.setLocked(true);
 		}
@@ -880,6 +1083,289 @@
 			self.send(action);
 		});
 		bubble.querySelector('.la-bubble').appendChild(btn);
+	};
+
+	/* ── message allowance ────────────────────────────────────────────────
+	 * The service enforces the limit; this only shows it. Everything here
+	 * is safe to get wrong — at worst the counter is stale — because a
+	 * message over the limit is refused by the server whatever the page says.
+	 */
+
+	Widget.prototype.refreshUsage = function () {
+		var self = this;
+		return authed(AI, '/v1/usage', { method: 'GET' }).then(
+			function (u) {
+				self.usage = u;
+				var wasReached = self.quotaReached;
+				self.quotaReached = u.limit !== null && u.remaining === 0;
+				self.renderUsage();
+
+				if (self.quotaReached) {
+					self.setLocked(true);
+					self.showQuotaPanel();
+				} else if (wasReached) {
+					// Back from signing in: the anonymous limit no longer applies.
+					var panel = self.thread.querySelector('.la-quota');
+					if (panel) panel.remove();
+					self.setLocked(false);
+				}
+				return u;
+			},
+			function () { /* the counter is a convenience; never block chat on it */ }
+		);
+	};
+
+	Widget.prototype.renderUsage = function () {
+		if (!this.usageEl) return;
+		var u = this.usage;
+		// Staff are unlimited, and a counter reading "∞" is noise.
+		if (!u || u.limit === null) {
+			this.usageEl.hidden = true;
+			return;
+		}
+		this.usageEl.hidden = false;
+		this.usageEl.textContent = T.remaining.replace('%s', String(u.remaining));
+		this.usageEl.classList.toggle('is-low', u.remaining <= 2);
+	};
+
+	Widget.prototype.onQuotaExhausted = function (action, userNode, bubble) {
+		// Nothing was stored, so nothing stays on screen as if it had been.
+		if (userNode) userNode.remove();
+		if (bubble) bubble.remove();
+		// Their words go back in the box: after signing in they can send them.
+		this.input.value = action.text;
+		this.voiceDraft = action.inputMode === 'voice';
+		this.pending = null;
+		this.quotaReached = true;
+		this.setLocked(true);
+		this.showQuotaPanel();
+		return this.refreshUsage();
+	};
+
+	Widget.prototype.showQuotaPanel = function () {
+		if (this.thread.querySelector('.la-quota')) return;
+
+		var wrap = el('div', 'la-msg assistant la-quota');
+		var bubble = el('div', 'la-bubble');
+		var anonymous = Auth.isAnonymous();
+
+		if (anonymous) {
+			var u = this.usage;
+			var extra = u && u.registered_limit ? Math.max(0, u.registered_limit - u.used) : null;
+			var box = el('div', 'la-cta');
+			box.appendChild(el('div', 'la-cta-title', T.quotaAnonTitle));
+			if (extra) {
+				box.appendChild(el('div', 'la-cta-body', T.quotaAnonBody.replace('%s', String(extra))));
+			}
+			bubble.appendChild(box);
+			// Same sign-in / register panel the booking flow uses, with the
+			// same redirect back to this conversation.
+			this.showSignup(box);
+		} else {
+			var consult = CFG.consult || {};
+			var head = el('div', 'la-cta');
+			head.appendChild(el('div', 'la-cta-title', T.quotaUserTitle));
+			head.appendChild(el('div', 'la-cta-body', T.quotaUserBody));
+			bubble.appendChild(head);
+			if (consult.enabled && consult.checkout) {
+				bubble.appendChild(this.buildCtaBox({ title: false }));
+			}
+		}
+
+		wrap.appendChild(bubble);
+		this.thread.appendChild(wrap);
+		this.scroll();
+	};
+
+	/* ── speaking ─────────────────────────────────────────────────────── */
+
+	Widget.prototype.setMicState = function (state, seconds) {
+		if (!this.micBtn) return;
+		this.micBtn.classList.toggle('is-recording', state === 'recording');
+		this.micBtn.classList.toggle('is-busy', state === 'busy');
+		this.micBtn.disabled = state === 'busy' || (state === 'idle' && this.locked);
+		var label = state === 'recording' ? T.micStop : T.micStart;
+		this.micBtn.setAttribute('aria-label', label);
+		this.micBtn.title = label;
+		this.micBtn.textContent = state === 'recording' ? formatSeconds(seconds || 0) : '';
+
+		if (state === 'busy') {
+			this.input.placeholder = T.transcribing;
+		} else {
+			this.input.placeholder = T.placeholder;
+		}
+	};
+
+	Widget.prototype.startRecording = function () {
+		var self = this;
+		if (this.locked || this.recorder) return;
+		this.clearVoiceError();
+
+		var recorder = new Recorder();
+		recorder.start().then(
+			function () {
+				self.recorder = recorder;
+				self.setMicState('recording', 0);
+				var max = CFG.voiceMaxSeconds || 60;
+				self.recordTimer = window.setInterval(function () {
+					var secs = recorder.seconds();
+					self.setMicState('recording', secs);
+					// The server refuses anything longer; stopping here means
+					// a long question is sent rather than lost.
+					if (secs >= max) self.stopRecording();
+				}, 250);
+			},
+			function () {
+				self.showVoiceError(T.micDenied);
+			}
+		);
+	};
+
+	Widget.prototype.stopRecording = function () {
+		var self = this;
+		if (!this.recorder) return;
+		window.clearInterval(this.recordTimer);
+		var recorder = this.recorder;
+		this.recorder = null;
+
+		if (recorder.seconds() < 0.5) {
+			// A tap, not a question.
+			recorder.stop();
+			this.setMicState('idle');
+			return;
+		}
+
+		var wav = recorder.stop();
+		this.setMicState('busy');
+
+		Auth.ensure()
+			.then(function (auth) {
+				return request(AI, '/v1/transcribe', {
+					method: 'POST',
+					headers: {
+						'Authorization': 'Bearer ' + auth.access_token,
+						'Content-Type': 'audio/wav'
+					},
+					body: wav
+				});
+			})
+			.then(
+				function (result) {
+					// Into the box, not straight into the chat: the visitor sees
+					// what was heard and can fix a misheard word before a legal
+					// question is answered on the strength of it.
+					var existing = self.input.value.trim();
+					self.input.value = existing ? existing + ' ' + result.text : result.text;
+					self.voiceDraft = true;
+					self.input.focus();
+				},
+				function (err) {
+					if (err.code === 'message_quota_exhausted') {
+						self.quotaReached = true;
+						self.setLocked(true);
+						self.showQuotaPanel();
+						return;
+					}
+					self.showVoiceError(humanError(err));
+				}
+			)
+			.then(function () {
+				self.setMicState('idle');
+			});
+	};
+
+	Widget.prototype.showVoiceError = function (message) {
+		this.clearVoiceError();
+		var note = el('div', 'la-voice-error', message);
+		this.form.parentNode.insertBefore(note, this.form);
+		window.setTimeout(function () { note.remove(); }, 6000);
+	};
+
+	Widget.prototype.clearVoiceError = function () {
+		var old = this.root.querySelector('.la-voice-error');
+		if (old) old.remove();
+	};
+
+	/* ── listening ─────────────────────────────────────────────────────── */
+
+	Widget.prototype.addListen = function (node, messageId) {
+		var self = this;
+		if (!CFG.voiceEnabled || !messageId || node.querySelector('.la-listen')) return;
+
+		var btn = el('button', 'la-listen');
+		btn.type = 'button';
+		btn.textContent = T.listen;
+		btn.addEventListener('click', function () {
+			self.toggleListen(messageId, btn);
+		});
+		node.querySelector('.la-bubble').appendChild(btn);
+	};
+
+	Widget.prototype.toggleListen = function (messageId, btn) {
+		var self = this;
+
+		// One voice at a time. Pressing the playing answer stops it; pressing
+		// another switches to that one.
+		if (this.audio) {
+			var same = this.audio.messageId === messageId;
+			this.stopListening();
+			if (same) return;
+		}
+
+		function play(url) {
+			var audio = new Audio(url);
+			self.audio = { messageId: messageId, el: audio, button: btn };
+			btn.textContent = T.stopListening;
+			btn.classList.add('is-playing');
+			audio.addEventListener('ended', function () { self.stopListening(); });
+			audio.play().catch(function () { self.stopListening(); });
+		}
+
+		if (this.audioUrls[messageId]) {
+			play(this.audioUrls[messageId]);
+			return;
+		}
+
+		btn.disabled = true;
+		btn.textContent = T.loadingAudio;
+		Auth.ensure()
+			.then(function (auth) {
+				return fetch(AI + '/v1/messages/' + encodeURIComponent(messageId) + '/audio', {
+					headers: { 'Authorization': 'Bearer ' + auth.access_token }
+				});
+			})
+			.then(function (res) {
+				if (!res.ok) {
+					return res.text().then(function (text) {
+						var body = null;
+						try { body = JSON.parse(text); } catch (e) { body = null; }
+						var env = body && body.error ? body.error : {};
+						throw new ApiError(env.code, env.message, res.status);
+					});
+				}
+				return res.blob();
+			})
+			.then(
+				function (blob) {
+					btn.disabled = false;
+					// Kept for the page view, so a second listen costs nothing.
+					self.audioUrls[messageId] = URL.createObjectURL(blob);
+					play(self.audioUrls[messageId]);
+				},
+				function (err) {
+					btn.disabled = false;
+					btn.textContent = T.listen;
+					self.showVoiceError(humanError(err));
+				}
+			);
+	};
+
+	Widget.prototype.stopListening = function () {
+		if (!this.audio) return;
+		this.audio.el.pause();
+		this.audio.button.textContent = T.listen;
+		this.audio.button.classList.remove('is-playing');
+		this.audio = null;
 	};
 
 	/* ── the consultation CTA ─────────────────────────────────────────────

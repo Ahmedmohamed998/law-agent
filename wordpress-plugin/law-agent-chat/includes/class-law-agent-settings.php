@@ -25,6 +25,7 @@ class Law_Agent_Settings {
 			'ai_url'           => 'http://127.0.0.1:8000',
 			'backend_url'      => 'http://127.0.0.1:8001',
 			'consult_enabled'  => 1,
+			'voice_enabled'    => 1,
 			'paymob_iframe'    => 'https://ksa.paymob.com/api/acceptance/iframes/13464',
 			'shared_secret'    => '',
 			'login_url'        => '',
@@ -71,6 +72,7 @@ class Law_Agent_Settings {
 		// charges from its own configuration, so a number stored here could
 		// only ever disagree with the invoice.
 		$out['consult_enabled'] = empty( $in['consult_enabled'] ) ? 0 : 1;
+		$out['voice_enabled']   = empty( $in['voice_enabled'] ) ? 0 : 1;
 		$out['paymob_iframe']   = untrailingslashit( esc_url_raw( trim( (string) ( isset( $in['paymob_iframe'] ) ? $in['paymob_iframe'] : '' ) ) ) );
 		// Trimmed only. It is a shared secret, not a display string: sanitising
 		// it would silently change the bytes being signed and every assertion
@@ -141,6 +143,16 @@ class Law_Agent_Settings {
 								<?php esc_html_e( 'Offer a paid consultation when the assistant declines to answer', 'law-agent-chat' ); ?>
 							</label>
 							<p class="description"><?php esc_html_e( 'Shown on answers labelled "refused". Buying requires an account, so anonymous visitors are asked to sign up first -- that signup upgrades their existing user row, so the conversation they already had stays theirs.', 'law-agent-chat' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Voice', 'law-agent-chat' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="<?php echo esc_attr( $option ); ?>[voice_enabled]" value="1" <?php checked( $o['voice_enabled'], 1 ); ?>>
+								<?php esc_html_e( 'Let visitors speak their question, and listen to answers', 'law-agent-chat' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'Uses Amazon Transcribe and Polly on the AI service. Turn this off if those are not permitted for its AWS credentials: the microphone and listen buttons disappear and typed chat is unaffected. The microphone only appears on HTTPS pages in browsers that support recording.', 'law-agent-chat' ); ?></p>
 						</td>
 					</tr>
 					<tr>

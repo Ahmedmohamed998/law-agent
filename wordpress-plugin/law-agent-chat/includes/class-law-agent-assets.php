@@ -88,6 +88,11 @@ class Law_Agent_Assets {
 					'restNonce'       => wp_create_nonce( 'wp_rest' ),
 					'loginUrl'        => $o['login_url'] ? $o['login_url'] : wp_login_url(),
 					'registerUrl'     => $o['register_url'],
+					'voiceEnabled'    => (bool) $o['voice_enabled'],
+					// Must match VOICE_MAX_SECONDS on the AI service, which
+					// refuses longer recordings. The widget stops here so a
+					// long question is sent rather than rejected.
+					'voiceMaxSeconds' => 60,
 					'greeting'   => $o['greeting'],
 					'i18n'       => self::strings(),
 				)
@@ -162,6 +167,24 @@ class Law_Agent_Assets {
 			'errGeneric'       => __( 'حدث خطأ غير متوقع. حاول مجددًا.', 'law-agent-chat' ),
 			'errUnconfigured'  => __( 'لم يتم إعداد المساعد بعد.', 'law-agent-chat' ),
 			'retry'            => __( 'إعادة المحاولة', 'law-agent-chat' ),
+
+			/* translators: %s: number of messages left */
+			'remaining'        => __( 'الرسائل المتبقية: %s', 'law-agent-chat' ),
+			'quotaAnonTitle'   => __( 'انتهت رسائلك المجانية', 'law-agent-chat' ),
+			/* translators: %s: number of extra messages an account gives */
+			'quotaAnonBody'    => __( 'سجّل دخولك لتحصل على %s رسالة إضافية.', 'law-agent-chat' ),
+			'quotaUserTitle'   => __( 'وصلت إلى الحد الأقصى من الرسائل', 'law-agent-chat' ),
+			'quotaUserBody'    => __( 'لمتابعة حالتك، يمكنك حجز استشارة مع محامٍ.', 'law-agent-chat' ),
+
+			'micStart'         => __( 'تسجيل صوتي', 'law-agent-chat' ),
+			'micStop'          => __( 'إيقاف التسجيل', 'law-agent-chat' ),
+			'transcribing'     => __( 'جارٍ تحويل الصوت إلى نص…', 'law-agent-chat' ),
+			'micDenied'        => __( 'لم نتمكن من الوصول إلى الميكروفون. اسمح بالوصول من إعدادات المتصفح.', 'law-agent-chat' ),
+			'noSpeech'         => __( 'لم نسمع كلامًا واضحًا. حاول مرة أخرى.', 'law-agent-chat' ),
+			'speechDown'       => __( 'خدمة الصوت غير متاحة حاليًا. اكتب سؤالك بدلًا من ذلك.', 'law-agent-chat' ),
+			'listen'           => __( 'استمع', 'law-agent-chat' ),
+			'stopListening'    => __( 'إيقاف', 'law-agent-chat' ),
+			'loadingAudio'     => __( 'جارٍ التحميل…', 'law-agent-chat' ),
 		);
 	}
 }

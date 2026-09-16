@@ -564,6 +564,138 @@
 	background: var(--la-warn);
 }
 
+/* ── messages left ───────────────────────────────────────────────────── */
+
+.law-agent-chat .la-usage {
+	padding: 6px 16px 0;
+	background: var(--la-panel);
+	border-top: 1px solid var(--la-rule);
+	color: var(--la-faint);
+	font-size: 12.5px;
+	text-align: right;
+}
+
+.law-agent-chat .la-usage[hidden] { display: none; }
+
+/* Two or fewer left: worth noticing before it happens, not after. */
+.law-agent-chat .la-usage.is-low { color: var(--la-warn); font-weight: 600; }
+
+.law-agent-chat .la-usage + .la-composer { border-top: 0; }
+
+/* ── microphone ──────────────────────────────────────────────────────── */
+
+.law-agent-chat .la-mic {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-width: 48px;
+	height: 48px;
+	padding: 0 12px;
+	border: 1px solid var(--la-rule);
+	border-radius: var(--la-radius-sm);
+	background: var(--la-bg);
+	color: var(--la-teal);
+	font: inherit;
+	font-size: 13px;
+	font-variant-numeric: tabular-nums;
+	cursor: pointer;
+	transition: background .15s ease, border-color .15s ease;
+}
+
+.law-agent-chat .la-mic[hidden] { display: none; }
+
+/* The glyph is drawn rather than an emoji, so it matches the theme's weight. */
+.law-agent-chat .la-mic::before {
+	content: "";
+	width: 12px;
+	height: 18px;
+	border: 2px solid currentColor;
+	border-radius: 7px;
+	box-shadow: 0 7px 0 -5px currentColor;
+}
+
+.law-agent-chat .la-mic:hover { border-color: var(--la-sage); background: var(--la-sage-soft); }
+
+.law-agent-chat .la-mic.is-recording {
+	border-color: var(--la-danger);
+	background: var(--la-danger-soft);
+	color: var(--la-danger);
+}
+
+.law-agent-chat .la-mic.is-recording::before {
+	width: 10px;
+	height: 10px;
+	border: 0;
+	border-radius: 50%;
+	background: currentColor;
+	box-shadow: none;
+	animation: la-pulse 1.2s ease-in-out infinite;
+}
+
+.law-agent-chat .la-mic.is-busy { opacity: .6; cursor: progress; }
+.law-agent-chat .la-mic[disabled] { opacity: .5; cursor: default; }
+
+@keyframes la-pulse { 50% { opacity: .35; } }
+
+@media (prefers-reduced-motion: reduce) {
+	.law-agent-chat .la-mic.is-recording::before { animation: none; }
+}
+
+.law-agent-chat .la-voice-error {
+	margin: 0 14px;
+	padding: 8px 11px;
+	border-radius: var(--la-radius-sm);
+	background: var(--la-danger-soft);
+	color: var(--la-danger);
+	font-size: 13px;
+}
+
+/* A question that was spoken, marked quietly on the visitor's own bubble. */
+.law-agent-chat .la-msg.user.is-voice .la-bubble::before {
+	content: "🎙";
+	margin-inline-end: 6px;
+	font-size: 12px;
+	opacity: .85;
+}
+
+/* ── listening ───────────────────────────────────────────────────────── */
+
+.law-agent-chat .la-listen {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 10px;
+	padding: 5px 12px;
+	border: 1px solid var(--la-sage-rule);
+	border-radius: 999px;
+	background: var(--la-panel);
+	color: var(--la-teal);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.law-agent-chat .la-listen::before {
+	content: "";
+	width: 0;
+	height: 0;
+	border-block: 5px solid transparent;
+	border-inline-end: 8px solid currentColor;
+}
+
+.law-agent-chat .la-listen.is-playing::before {
+	width: 8px;
+	height: 10px;
+	border: 0;
+	border-inline: 3px solid currentColor;
+}
+
+.law-agent-chat .la-listen:hover { background: var(--la-sage-soft); }
+.law-agent-chat .la-listen[disabled] { opacity: .6; cursor: progress; }
+
 /* ── errors ──────────────────────────────────────────────────────────── */
 
 .law-agent-chat .la-error {
