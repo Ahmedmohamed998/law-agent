@@ -389,8 +389,24 @@ export class BillingService {
       orderBy: { created_at: "desc" },
       take: Math.min(params.limit ?? 100, 500),
       skip: params.offset ?? 0,
-      include: {
-        users: {
+      include: BillingService.ADMIN_INCLUDE,
+    });
+
+    return rows.map((r) => BillingService.adminRow(r));
+  }
+
+  /** One consultation for the dashboard's case page, or 404. */
+  async getForAdmin(id: string): Promise<AdminConsultationRow> {
+    const row = await this.prisma.consultations.findUnique({
+      where: { id },
+      include: BillingService.ADMIN_INCLUDE,
+    });
+    if (!row) throw notFound("consultation_not_found", "no such consultation");
+    return BillingService.adminRow(row);
+  }
+
+  private static readonly ADMIN_INCLUDE = {
+    users: {
           select: {
             id: true,
             email: true,
@@ -403,14 +419,14 @@ export class BillingService {
             wp_role: true,
           },
         },
-        payments: {
-          orderBy: { created_at: "desc" },
-          take: 1,
-        },
-      },
-    });
+    payments: {
+      orderBy: { created_at: "desc" as const },
+      take: 1,
+    },
+  };
 
-    return rows.map((r) => ({
+  private static adminRow(r: any): AdminConsultationRow {
+    return {
       consultation_id: r.id,
       status: r.status,
       amount_cents: r.amount_cents,
@@ -440,7 +456,7 @@ export class BillingService {
             payment_amount_cents: r.payments[0].amount_cents,
           }
         : null,
-    }));
+    };
   }
 
   /**

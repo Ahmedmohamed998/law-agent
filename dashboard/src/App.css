@@ -369,3 +369,162 @@
 /* Arabic summaries arrive right-to-left; let the browser decide per row
    rather than forcing a direction that is wrong half the time. */
 .case-summary { unicode-bidi: plaintext; }
+
+/* ── overview table: rows open a case ─────────────────────────────────── */
+
+.row-clickable { cursor: pointer; }
+
+.open-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--accent-primary);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.open-btn:hover,
+.open-btn:focus-visible {
+  border-color: var(--accent-primary);
+  background: var(--bg-tertiary);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── case page ────────────────────────────────────────────────────────── */
+
+.case-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.back-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.back-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+
+.case-page .page-header { margin-bottom: 0; }
+
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.case-card {
+  padding: 20px 22px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.case-card-title {
+  margin: 0 0 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 9px 16px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.facts dt { color: var(--text-secondary); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+
+/* Phone numbers and transaction ids read left to right even inside an
+   Arabic summary block. */
+.ltr { direction: ltr; unicode-bidi: isolate; }
+
+.case-summary-card { border-inline-start: 3px solid var(--accent-soft); }
+
+.case-summary-text {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.7;
+  unicode-bidi: plaintext;
+}
+
+.muted { color: var(--text-muted); font-size: 0.85rem; }
+
+/* ── transcript ───────────────────────────────────────────────────────── */
+
+.transcript {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.turn {
+  max-width: 88%;
+  padding: 12px 15px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+/* The client's side and the assistant's side, as in the widget they used. */
+.turn-user {
+  align-self: flex-start;
+  background: #e8f3ed;
+  border-color: #cfe6da;
+}
+
+.turn-assistant { align-self: flex-end; }
+
+.turn-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.turn-meta .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.turn-text {
+  white-space: pre-wrap;
+  line-height: 1.75;
+  unicode-bidi: plaintext;
+}

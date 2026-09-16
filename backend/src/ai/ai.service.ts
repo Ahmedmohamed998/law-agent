@@ -19,6 +19,33 @@ import { Injectable, Logger } from "@nestjs/common";
 
 import { loadConfig } from "../config/configuration";
 
+export interface StaffMessage {
+  seq: number;
+  role: "user" | "assistant";
+  content: string;
+  source_label: string | null;
+  input_mode: "text" | "voice";
+  status: string;
+  created_at: string | null;
+}
+
+export interface StaffConversation {
+  session_id: string;
+  user_id: string;
+  status: string;
+  lang: string | null;
+  title: string | null;
+  created_at: string;
+  messages: StaffMessage[];
+  voice_messages: number;
+  messages_used: number;
+  message_limit: number;
+}
+
+export type StaffConversationResult =
+  | { ok: true; data: StaffConversation }
+  | { ok: false; error: string };
+
 export interface DeliveryResult {
   delivered: boolean;
   error: string | null;
@@ -92,6 +119,44 @@ export class AiService {
       AiService.log.warn(`erasure not delivered for ${userId}: ${result.error}`);
     }
     return result;
+  }
+
+  /**
+   * A client's conversation, read with the STAFF MEMBER'S OWN TOKEN.
+   *
+   * Deliberately not the admin key. The key is shared by services and the
+   * AI service promises it can never read a conversation; a forwarded staff
+   * token names who looked and expires in fifteen minutes. A caller that
+   * reached the dashboard with the admin key instead (a cron, a script) gets
+   * no transcript, which is correct.
+   *
+   * Failures come back as a value, not a throw: the case page still has
+   * everything else to show if the AI service is slow or down.
+   */
+  async staffConversation(
+    sessionId: string,
+    bearer: string | null,
+  ): Promise<StaffConversationResult> {
+    if (!bearer) {
+      return { ok: false, error: "transcripts need a staff sign-in, not the admin key" };
+    }
+    const url = `${this.config.aiServiceUrl.replace(/\/+$/, "")}/v1/staff/sessions/${encodeURIComponent(sessionId)}`;
+    try {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${bearer}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.ok) {
+        return { ok: true, data: (await response.json()) as StaffConversation };
+      }
+      const body = await response.text();
+      return { ok: false, error: `HTTP ${response.status}: ${body.slice(0, 200)}` };
+    } catch (err) {
+      return {
+        ok: false,
+        error: `${(err as Error).name}: ${(err as Error).message}`.slice(0, 200),
+      };
+    }
   }
 
   /**

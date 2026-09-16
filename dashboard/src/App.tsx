@@ -10,6 +10,7 @@ import {
   Loader2
 } from 'lucide-react';
 import './App.css';
+import CaseDetail from './CaseDetail';
 
 // --- Types ---
 interface DashboardStats {
@@ -135,6 +136,8 @@ function App() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  // The case being viewed, or null for the overview.
+  const [selectedCase, setSelectedCase] = useState<string | null>(null);
 
   // Resume a stored session on load. A dead one just shows the login form.
   useEffect(() => {
@@ -238,6 +241,14 @@ function App() {
     clearSession();
   };
 
+  /** Headers for an API call, refreshing the access token if it has aged out. */
+  const authHeaders = async (): Promise<Record<string, string>> => {
+    const current = session ?? loadSession();
+    if (!current) throw new Error('Session expired. Sign in again.');
+    const live = await fresh(current);
+    return { Authorization: `Bearer ${live.accessToken}` };
+  };
+
   const formatMoney = (cents: number, currency: string = 'SAR') => {
     return (cents / 100).toLocaleString('en-SA', { style: 'currency', currency: currency });
   };
@@ -325,6 +336,17 @@ function App() {
 
       <main className="main-content">
         <div className="container">
+          {selectedCase ? (
+            <CaseDetail
+              consultationId={selectedCase}
+              backend={BACKEND}
+              authHeaders={authHeaders}
+              onBack={() => setSelectedCase(null)}
+              formatMoney={formatMoney}
+              formatDate={formatDate}
+            />
+          ) : (
+          <>
           <div className="page-header animate-fade-in delay-1">
             <h1 className="page-title">Overview</h1>
             <p className="page-subtitle">Real-time consultation and revenue metrics.</p>
@@ -385,11 +407,16 @@ function App() {
                   <th>Status</th>
                   <th>Escalation</th>
                   <th>Date</th>
+                  <th><span className="sr-only">Open</span></th>
                 </tr>
               </thead>
               <tbody>
                 {consultations.map(c => (
-                  <tr key={c.consultation_id}>
+                  <tr
+                    key={c.consultation_id}
+                    className="row-clickable"
+                    onClick={() => setSelectedCase(c.consultation_id)}
+                  >
                     <td>
                       <div className="user-cell">
                         <span className="user-name">{c.user?.display_name || 'Anonymous User'}</span>
@@ -443,12 +470,22 @@ function App() {
                     <td style={{color: 'var(--text-secondary)', fontSize: '0.875rem'}}>
                       {formatDate(c.created_at)}
                     </td>
+                    <td>
+                      {/* The row is clickable for a mouse; this is the same
+                          action for a keyboard, which a <tr> cannot receive. */}
+                      <button
+                        className="open-btn"
+                        onClick={(e) => { e.stopPropagation(); setSelectedCase(c.consultation_id); }}
+                      >
+                        Open
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 
                 {consultations.length === 0 && !isLoading && (
                   <tr>
-                    <td colSpan={5} style={{textAlign: 'center', color: 'var(--text-muted)'}}>
+                    <td colSpan={6} style={{textAlign: 'center', color: 'var(--text-muted)'}}>
                       No consultations found.
                     </td>
                   </tr>
@@ -456,6 +493,8 @@ function App() {
               </tbody>
             </table>
           </div>
+          </>
+          )}
         </div>
       </main>
     </div>

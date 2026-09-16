@@ -13,7 +13,15 @@ import { IsOptional, IsString, Length } from "class-validator";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 
-import { AdminKeyOrStaffGuard, AuthGuard, CurrentCaller, RegisteredGuard, type Caller } from "../auth/auth.guard";
+import {
+  AdminKeyOrStaffGuard,
+  AuthGuard,
+  CurrentCaller,
+  RegisteredGuard,
+  bearerFrom,
+  type Caller,
+} from "../auth/auth.guard";
+import { AiService, type StaffConversation } from "../ai/ai.service";
 import { BillingService, type AdminConsultationRow, type ConsultationOut, type DashboardStats } from "./billing.service";
 import { PaymobService, type PaymobTransaction } from "./paymob.service";
 import { loadConfig } from "../config/configuration";
@@ -180,7 +188,10 @@ export class WebhooksController {
 @Controller("admin/billing")
 @UseGuards(AdminKeyOrStaffGuard)
 export class BillingAdminController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly ai: AiService,
+  ) {}
 
   /** Paid but never handed to a lawyer. The queue that must not grow. */
   @Get("unescalated")
@@ -209,6 +220,34 @@ export class BillingAdminController {
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
+  }
+
+  /**
+   * One case: the consultation, the client, the payment, and the conversation.
+   *
+   * The conversation lives in the AI service's schema, which this service's
+   * database role cannot read — so it is fetched over HTTP, with the caller's
+   * own token forwarded. If that fails the rest of the case still renders,
+   * with the reason, rather than the whole page erroring.
+   */
+  @Get("consultations/:id")
+  async getOne(
+    @Param("id") id: string,
+    @Req() req: Request,
+  ): Promise<
+    AdminConsultationRow & {
+      conversation: StaffConversation | null;
+      conversation_error: string | null;
+    }
+  > {
+    const row = await this.billing.getForAdmin(id);
+    if (!row.ai_session_id) {
+      return { ...row, conversation: null, conversation_error: null };
+    }
+    const result = await this.ai.staffConversation(row.ai_session_id, bearerFrom(req));
+    return result.ok
+      ? { ...row, conversation: result.data, conversation_error: null }
+      : { ...row, conversation: null, conversation_error: result.error };
   }
 
   /**
