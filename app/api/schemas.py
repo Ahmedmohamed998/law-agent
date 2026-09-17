@@ -55,6 +55,11 @@ class MessageOut(BaseModel):
     sources: list[SourceOut] = []
     created_at: datetime | None = None
     input_mode: InputMode = "text"
+    # A service the assistant proposed under this answer, by catalogue slug.
+    # The client prices it from GET /services at render time, so a stored
+    # suggestion never shows a stale figure.
+    suggested_service: str | None = None
+    suggestion_reason: str | None = None
 
 
 class AnswerOut(BaseModel):
@@ -63,6 +68,7 @@ class AnswerOut(BaseModel):
     content: str
     source_label: SourceLabel
     sources: list[SourceOut]
+    suggestion: dict | None = None
     latency_ms: int
 
 
@@ -98,6 +104,10 @@ class AdminMessageOut(BaseModel):
     input_mode: str = "text"
     status: str
     created_at: datetime | None = None
+    suggested_service: str | None = None
+    suggestion_reason: str | None = None
+    suggestion_confidence: float | None = None
+    suggestion_clicked: bool = False
 
 
 class AdminSessionOut(BaseModel):

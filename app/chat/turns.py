@@ -8,6 +8,7 @@ suite exercises is the code path the API runs.
 
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 
@@ -25,6 +26,8 @@ from app.db.repository import SourceRow
 from app.db.session import Principal
 from app.rag.answer import build_messages, split_label, split_partial
 from app.rag.retriever import RetrievalRequest, RetrievedChunk, Retriever
+from app.suggest import engine as suggest
+from app.suggest.classify import Suggestion, allowed_now
 
 # A callable opening one short transaction bound to this request's tenant —
 # `functools.partial(scoped_session, principal)` in the API layer.
@@ -40,6 +43,7 @@ class TurnResult:
     sources: list[dict]
     latency_ms: int
     reused: bool = False  # idempotent replay of an already-answered submit
+    suggestion: dict | None = None  # a service the assistant proposed
 
 
 @dataclass
@@ -53,6 +57,8 @@ class _Prepared:
     plan: dict | None = None
     index_version: str | None = None
     reused: TurnResult | None = None
+    # The service classifier, already running while the answer generates.
+    suggestion: Future | None = None
 
 
 # Bedrock client is instantiated per-call inside bedrock_chat / bedrock_chat_stream.
@@ -146,6 +152,18 @@ def _prepare(
     # are immutable, so it is a sound cache key and costs nothing to compute.
     history_key = next((m.id for m in reversed(turns) if m.role == "user"), "")
 
+    # Started before retrieval, so it runs beside retrieval and generation
+    # rather than after them. Needs only the question and a little context.
+    suggestion = None
+    if settings().suggestions_enabled:
+        n = settings().suggest_history_turns
+        suggestion = suggest.start(
+            principal, content,
+            [(m.role, m.content) for m in turns[-n:]] if n else [],
+            already=repo.suggested_slugs(db, principal, session_id),
+            last_answer_suggested=repo.last_answer_suggested(db, principal, session_id),
+        )
+
     result = retriever.run(
         RetrievalRequest(raw=content, history=history, history_key=history_key)
     )
@@ -156,6 +174,7 @@ def _prepare(
         dialogue=[{"role": m.role, "content": m.content} for m in turns],
         plan=result.plan.as_dict(),
         index_version=result.index_version,
+        suggestion=suggestion,
     )
 
 
@@ -193,6 +212,18 @@ def _persist(
         status=status,
         error_code=error_code,
     )
+
+
+def _settle_suggestion(
+    prep: _Prepared, label: str | None
+) -> Suggestion | None:
+    """Collect the classifier's verdict, if the answer's outcome allows it."""
+    if prep.suggestion is None:
+        return None
+    if not allowed_now(mode=settings().suggest_mode, source_label=label):
+        prep.suggestion.cancel()
+        return None
+    return suggest.collect(prep.suggestion)
 
 
 def _finish(
@@ -244,6 +275,7 @@ def take_turn(
         raise
     label, text = split_label(raw, bool(prep.chunks))
     latency = int((time.perf_counter() - started) * 1000)
+    suggestion = _settle_suggestion(prep, label)
 
     with scope() as db:
         row = _persist(
@@ -251,9 +283,15 @@ def take_turn(
             latency_ms=latency,
         )
         message_id, seq = row.id, row.seq
+        if suggestion is not None:
+            repo.set_suggestion(
+                db, principal, message_id, service=suggestion.service.slug,
+                reason=suggestion.reason, confidence=suggestion.confidence,
+            )
     return TurnResult(
         message_id=message_id, seq=seq, content=text, source_label=label,
         sources=prep.sources, latency_ms=latency,
+        suggestion=suggestion.as_event() if suggestion else None,
     )
 
 
@@ -324,6 +362,8 @@ def stream_turn(
                 yield {"event": "token", "data": {"delta": text[emitted:]}}
                 emitted = len(text)
     except Exception as exc:  # upstream failure mid-generation
+        if prep.suggestion is not None:
+            prep.suggestion.cancel()
         label, text = split_label(acc, bool(prep.chunks))
         with scope() as db:
             _finish(db, principal, message_id, text=text, label=label,
@@ -337,7 +377,16 @@ def stream_turn(
 
     label, text = split_label(acc, bool(prep.chunks))
     latency = int((time.perf_counter() - started) * 1000)
+    suggestion = _settle_suggestion(prep, label)
     with scope() as db:
         _finish(db, principal, message_id, text=text, label=label,
                 latency_ms=latency)
+        if suggestion is not None:
+            repo.set_suggestion(
+                db, principal, message_id, service=suggestion.service.slug,
+                reason=suggestion.reason, confidence=suggestion.confidence,
+            )
+    # Before `done`, so a client that stops reading at `done` still gets it.
+    if suggestion is not None:
+        yield {"event": "suggestion", "data": suggestion.as_event()}
     yield {"event": "done", "data": {"source_label": label, "latency_ms": latency}}

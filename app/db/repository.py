@@ -415,6 +415,65 @@ def add_assistant_message(
     return row
 
 
+def set_suggestion(
+    db: SASession,
+    principal: Principal,
+    message_id: str,
+    *,
+    service: str,
+    reason: str,
+    confidence: float,
+) -> None:
+    """Record what the assistant proposed under an answer it owns."""
+    row = db.scalar(
+        select(Message)
+        .join(Session, Session.id == Message.session_id)
+        .where(Message.id == message_id, Session.user_id == principal.user_id)
+    )
+    if row is None:
+        raise NotFound(message_id)
+    row.suggested_service = service
+    row.suggestion_reason = reason
+    row.suggestion_confidence = confidence
+
+
+def suggested_slugs(db: SASession, principal: Principal, session_id: str) -> set[str]:
+    """Every service already proposed in this conversation. Once each."""
+    get_session(db, principal, session_id)
+    rows = db.scalars(
+        select(Message.suggested_service).where(
+            Message.session_id == session_id,
+            Message.suggested_service.is_not(None),
+        )
+    )
+    return {r for r in rows if r}
+
+
+def last_answer_suggested(db: SASession, principal: Principal, session_id: str) -> bool:
+    """Did the previous assistant turn carry a suggestion? Two in a row is
+    a sales pitch, not help."""
+    row = db.scalar(
+        select(Message.suggested_service)
+        .where(Message.session_id == session_id, Message.role == "assistant")
+        .order_by(Message.seq.desc())
+        .limit(1)
+    )
+    return bool(row)
+
+
+def mark_suggestion_clicked(db: SASession, principal: Principal, message_id: str) -> None:
+    """The client pressed the card. First press only; a second is noise."""
+    row = db.scalar(
+        select(Message)
+        .join(Session, Session.id == Message.session_id)
+        .where(Message.id == message_id, Session.user_id == principal.user_id)
+    )
+    if row is None or not row.suggested_service:
+        raise NotFound(message_id)
+    if row.suggestion_clicked_at is None:
+        row.suggestion_clicked_at = _now()
+
+
 def finish_message(
     db: SASession,
     principal: Principal,

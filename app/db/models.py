@@ -20,6 +20,7 @@ from datetime import datetime
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -156,6 +157,14 @@ class Message(Base):
     completion_tokens: Mapped[int | None] = mapped_column(Integer)
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     error_code: Mapped[str | None] = mapped_column(String(64))
+
+    # What the assistant proposed the client buy, under this answer. A slug
+    # from the product backend's catalogue, which this schema cannot
+    # reference; see app/suggest.
+    suggested_service: Mapped[str | None] = mapped_column(String(64))
+    suggestion_reason: Mapped[str | None] = mapped_column(Text)
+    suggestion_confidence: Mapped[float | None] = mapped_column(Float)
+    suggestion_clicked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     session: Mapped[Session] = relationship(back_populates="messages")
     sources: Mapped[list["MessageSource"]] = relationship(

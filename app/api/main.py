@@ -219,6 +219,8 @@ def history(session_id: str, p: Principal = Depends(current_principal)):
                 message_id=m.id, seq=m.seq, role=m.role, content=m.content,
                 source_label=m.source_label, created_at=m.created_at,
                 input_mode=m.input_mode or "text",
+                suggested_service=m.suggested_service,
+                suggestion_reason=m.suggestion_reason,
                 sources=[
                     SourceOut(citation=s.citation, doc_title=s.doc_title,
                               article_label=s.article_label, reason=s.reason)
@@ -247,7 +249,7 @@ def post_message(
     return AnswerOut(
         message_id=result.message_id, seq=result.seq, content=result.content,
         source_label=result.source_label, sources=_sources(result.sources),
-        latency_ms=result.latency_ms,
+        latency_ms=result.latency_ms, suggestion=result.suggestion,
     )
 
 
@@ -401,6 +403,18 @@ async def transcribe_recording(request: Request, p: Principal = Depends(current_
     return TranscriptOut(text=text, duration_seconds=round(pcm.seconds, 1))
 
 
+@app.post("/v1/messages/{message_id}/suggestion-click", status_code=204)
+def suggestion_click(message_id: str, p: Principal = Depends(current_principal)):
+    """The client pressed the suggested-service card under this answer.
+
+    A measurement, nothing more: with the order's link to the conversation
+    it closes the loop suggested -> clicked -> bought. Idempotent; the first
+    press is the one that counts.
+    """
+    with scoped_session(p) as db:
+        repo.mark_suggestion_clicked(db, p, message_id)
+
+
 @app.get("/v1/messages/{message_id}/audio")
 def message_audio(message_id: str, p: Principal = Depends(current_principal)):
     """An answer read aloud, as MP3.
@@ -471,6 +485,10 @@ def staff_session(session_id: str, p: Principal = Depends(staff_principal)):
                     source_label=m.source_label,
                     input_mode=m.input_mode or "text",
                     status=m.status, created_at=m.created_at,
+                    suggested_service=m.suggested_service,
+                    suggestion_reason=m.suggestion_reason,
+                    suggestion_confidence=m.suggestion_confidence,
+                    suggestion_clicked=m.suggestion_clicked_at is not None,
                 )
                 for m in rows
             ],

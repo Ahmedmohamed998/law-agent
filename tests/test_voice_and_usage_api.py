@@ -121,7 +121,8 @@ def test_input_mode_is_accepted_and_validated(client, monkeypatch):
     def fake_take_turn(scope, p, r, **kw):
         seen.update(kw)
         return SimpleNamespace(message_id="m1", seq=2, content="جواب",
-                               source_label="documents", sources=[], latency_ms=5)
+                               source_label="documents", sources=[], latency_ms=5,
+                               suggestion=None)
 
     monkeypatch.setattr(main, "take_turn", fake_take_turn)
     main.app.dependency_overrides[main.retriever] = lambda: None
@@ -261,13 +262,19 @@ def test_admin_reads_transcript_with_voice_count(client, monkeypatch):
     now = datetime.now(timezone.utc)
     session = SimpleNamespace(id="s1", user_id="u_client", status="escalated",
                               lang="Arabic", title="سؤال", created_at=now)
+    def row(**kw):
+        base = dict(source_label=None, input_mode="text", status="complete", created_at=now,
+                    suggested_service=None, suggestion_reason=None,
+                    suggestion_confidence=None, suggestion_clicked_at=None)
+        base.update(kw)
+        return SimpleNamespace(**base)
+
     rows = [
-        SimpleNamespace(seq=1, role="user", content="سؤال مكتوب", source_label=None,
-                        input_mode="text", status="complete", created_at=now),
-        SimpleNamespace(seq=2, role="assistant", content="جواب", source_label="documents",
-                        input_mode="text", status="complete", created_at=now),
-        SimpleNamespace(seq=3, role="user", content="سؤال بالصوت", source_label=None,
-                        input_mode="voice", status="complete", created_at=now),
+        row(seq=1, role="user", content="سؤال مكتوب"),
+        row(seq=2, role="assistant", content="جواب", source_label="documents",
+            suggested_service="contract-review", suggestion_reason="تريد مراجعة عقد",
+            suggestion_confidence=0.9, suggestion_clicked_at=now),
+        row(seq=3, role="user", content="سؤال بالصوت", input_mode="voice"),
     ]
     monkeypatch.setattr(repo, "session_for_staff", lambda db, sid: (session, rows, 7))
     r = client.get("/v1/staff/sessions/s1")
@@ -277,6 +284,12 @@ def test_admin_reads_transcript_with_voice_count(client, monkeypatch):
     assert body["messages_used"] == 7
     assert body["message_limit"] == 20
     assert [m["input_mode"] for m in body["messages"]] == ["text", "text", "voice"]
+    # What the assistant proposed travels to the dashboard, with whether the
+    # client pressed it.
+    answer = body["messages"][1]
+    assert answer["suggested_service"] == "contract-review"
+    assert answer["suggestion_clicked"] is True
+    assert body["messages"][0]["suggested_service"] is None
 
 
 def test_admin_key_alone_cannot_read_a_conversation(client):

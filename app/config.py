@@ -118,9 +118,31 @@ class Settings(BaseSettings):
     bind_host: str = "127.0.0.1"
     bind_port: int = 8000
 
+    # -- service suggestions ----------------------------------------------
+    # The one place this service knows the product backend exists: it reads
+    # the public catalogue (GET /services) so the assistant can propose a
+    # service under an answer. Read-only, cached, and optional — with no
+    # backend URL there are simply no suggestions.
+    backend_url: str = ""
+    services_refresh_seconds: int = 300
+    # Below this the classifier's pick is discarded. Start strict; lower it
+    # only with the evaluation set (tests/suggestions.jsonl) in hand.
+    suggest_min_confidence: float = 0.75
+    # "upsell": suggest whenever a service clearly fits, even under a good
+    # answer. "rescue": only when the answer was refused or asked to book.
+    suggest_mode: str = "upsell"
+    # Messages shorter than this are greetings and thanks, not needs.
+    suggest_min_words: int = 4
+    # How many turns of context the classifier sees besides the message.
+    suggest_history_turns: int = 3
+
     @property
     def auth_enforced(self) -> bool:
         return bool(self.jwks_url)
+
+    @property
+    def suggestions_enabled(self) -> bool:
+        return bool(self.backend_url)
 
 
 @lru_cache(maxsize=1)
