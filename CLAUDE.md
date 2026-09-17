@@ -26,13 +26,16 @@ docker compose; secrets in `.env`, `backend/.env`, and
 - `backend/` — Node/NestJS. Identity, tokens, consultations, Paymob, admin API.
 - `product/` — the earlier Python identity service, kept as the parity reference. Its Alembic migration creates `public.users` and must run before the billing SQL.
 - `dashboard/` — Vite/React admin dashboard. Build with `VITE_BACKEND_URL` set.
-- `wordpress-plugin/law-agent-chat/` — **the canonical plugin source.** Build the zip with Python `zipfile` (POSIX paths), never PowerShell `Compress-Archive`.
+- `wordpress-plugin/law-agent-chat/` — **the canonical plugin source.** Build the zip with Python `zipfile` (POSIX paths), never PowerShell `Compress-Archive`. Shortcodes: `[law_agent_chat]`, `[law_agent_services]`, `[law_agent_consultations]`; WooCommerce My Account tab "طلباتي" at `/my-account-2/consultations/`.
+- `app/suggest/` — the assistant proposing a service: catalogue cache, classifier, gates. Evaluation set `tests/suggestions.jsonl`.
 - `deploy/` — nginx vhosts, rate limits, deployment README.
 
 ## Rules that were learned the hard way
 
 - **Billing migrations run as `product_owner`, not `postgres`.** Grants to the app role come from `ALTER DEFAULT PRIVILEGES FOR ROLE product_owner` and only apply to tables that role creates. `0003` repairs ownership idempotently if this was done wrong.
-- **Price is server-side.** `POST /consultations` takes no amount; it comes from `CONSULTATION_PRICE_CENTS`. The widget asks `GET /consultations/price`.
+- **Price is server-side.** `POST /consultations` takes `service_id`, never an amount; the price is the `services` row's, snapshotted onto the order. The widget reads `GET /services` (public). `CONSULTATION_PRICE_CENTS` only seeded the migrated default.
+- **The catalogue is edited in the dashboard, nowhere else.** WordPress displays services; the AI service reads the same public list to know what it may suggest (`app/suggest`), and is off without `BACKEND_URL`.
+- **Anonymous visitors never see a payment step in the chat.** Booking button and offers become "sign in" until there is an account; the backend refuses them anyway.
 - **The admin key never reaches a browser.** Dashboard access is an `owner`/`admin` org membership; `/admin/billing/*` accepts either the key (for crons) or a staff token.
 - **WordPress asserts, the backend signs.** `/auth/wordpress` verifies an HMAC assertion minted in PHP over `LAW_AGENT_SHARED_SECRET`; the AI service is untouched. WP-backed users have no `password_hash` and cannot use `/auth/login`.
 - **Proxy the chat path through nothing.** SSE through PHP or a buffering proxy arrives as one lump. `staging2`'s vhost carries `proxy_buffering off`.

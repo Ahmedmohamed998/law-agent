@@ -333,3 +333,29 @@ migrated user's password *down* on their next login.
 - `CORS_ORIGIN_REGEX` allows localhost only.
 - The admin endpoints should sit on an internal route or behind network rules,
   not on the public frontend origin.
+
+## Services (the catalogue)
+
+`services` is what the site sells: slug, Arabic name and description, price,
+`active`, and three flags — `needs_conversation` (the lawyer gets the chat
+transcript and the chat locks on payment, as consultations always did),
+`needs_notes` (the client must describe the case before paying) and
+`suggestable` + `ai_hint` (whether and when the assistant may propose it).
+Edited only through `/admin/billing/services` (staff token), never deleted:
+orders reference services, so "remove" is `active = false`.
+
+The orders table is still called `consultations`. Each row snapshots
+`service_name` and `amount_cents` at purchase and carries `client_notes`.
+`POST /consultations` takes `service_id` (id or slug; absent means
+`consultation`, for the plugin release that predates the catalogue) and
+prices from the row — `CONSULTATION_PRICE_CENTS` only seeded the migrated
+default. Statuses: `pending`, `paid`, `in_progress`, `completed`,
+`cancelled`, `refunded`; the middle two are set by staff via
+`PATCH /admin/billing/consultations/:id/status`, the money ones by the
+webhook. One open order per service per user; an unpaid checkout counts as
+open for 30 minutes.
+
+`GET /services` is public and unauthenticated — it is a price list, and the
+AI service reads it with no user in hand.
+
+Migration: `prisma/migrations/0005_services.sql`, as `product_owner`.

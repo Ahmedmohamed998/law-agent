@@ -214,6 +214,7 @@ Same request body. Named events, in this order:
 | `meta` | `{"message_id", "seq"}` | Immediately — render the empty bubble |
 | `sources` | `{"sources": [...]}` | Before the first token |
 | `token` | `{"delta": "…"}` | Repeatedly. **Append**, don't replace |
+| `suggestion` | `{"service", "name", "description", "price_cents", "currency", "reason"}` | Optional, once, just before `done` |
 | `done` | `{"source_label", "latency_ms"}` | Final |
 | `error` | `{"code", "message"}` | Instead of `done` |
 
@@ -239,6 +240,19 @@ data: {"source_label": "documents", "latency_ms": 8676}
 
 A replayed `client_message_id` streams the stored answer back as a single
 `token` event, with `"replayed": true` on `meta`.
+
+**`suggestion`** is the assistant proposing one of the firm's services
+(see §7b). `service` is a catalogue slug. Render the card from `GET
+/services` on the product backend rather than from the event's `name` and
+`price_cents`, so a conversation reopened later shows today's price — and
+nothing at all if the service has been retired. Stored on the answer:
+`GET …/messages` returns `suggested_service` and `suggestion_reason`.
+
+### `POST /v1/messages/{message_id}/suggestion-click` → 204
+
+The client pressed the suggested-service card under this answer. A
+measurement only, idempotent; 404 if the message carries no suggestion or
+is not the caller's.
 
 ### `POST /v1/messages/{message_id}/feedback` → 204
 
@@ -377,6 +391,25 @@ parse out of the Arabic text.
 For `mixed` and `model_knowledge`, the answer text itself also tags the
 unsourced sentences inline and adds a note that the material may be out of
 date. The badge is in addition to that, not instead of it.
+
+## 7b. Service suggestions
+
+Off unless `BACKEND_URL` is set. The service reads the product backend's
+public `GET /services` every `SERVICES_REFRESH_SECONDS` and keeps the last
+copy through outages. For each qualifying user message a small classifier
+call runs beside retrieval and returns a slug from that list or null; a
+verdict that is not valid JSON, names an unlisted slug, or falls below
+`SUGGEST_MIN_CONFIDENCE` is dropped, and a verdict that is still running
+when the answer finishes is dropped rather than delaying `done`.
+
+Gates before any call: fewer than `SUGGEST_MIN_WORDS` words, a staff token,
+a suggestion on the previous answer, or every suggestable service already
+proposed in this conversation — all mean no call. Only services with a
+non-empty `ai_hint` and `suggestable = true` are ever considered.
+
+`SUGGEST_MODE=upsell` uses a verdict under any answer; `rescue` only under
+`refused` / `escalate`. The evaluation set is `tests/suggestions.jsonl`;
+`python -m tests.eval_suggestions` runs it against the real model.
 
 ## 8. Follow-up questions
 
