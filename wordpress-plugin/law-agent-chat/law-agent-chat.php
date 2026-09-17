@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Law Agent Chat
  * Description:       Embeds the Arabic labour-law assistant. A thin client: the browser talks to the AI service and the product backend directly, because proxying SSE through PHP buffers it.
- * Version:           2.6.0
+ * Version:           2.6.1
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Text Domain:       law-agent-chat
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'LAW_AGENT_CHAT_VERSION', '2.6.0' );
+define( 'LAW_AGENT_CHAT_VERSION', '2.6.1' );
 define( 'LAW_AGENT_CHAT_FILE', __FILE__ );
 define( 'LAW_AGENT_CHAT_DIR', plugin_dir_path( __FILE__ ) );
 define( 'LAW_AGENT_CHAT_URL', plugin_dir_url( __FILE__ ) );

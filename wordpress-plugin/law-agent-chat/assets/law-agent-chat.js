@@ -127,6 +127,9 @@
 
 	var AUTH_KEY = 'lawAgent.auth.v1';
 	var SESSION_KEY = 'lawAgent.session.v1';
+	// Set by "open the conversation" on the consultations page, consumed
+	// by the next page load: open the chat popup without a click.
+	var OPEN_KEY = 'lawAgent.openChat.v1';
 
 	/* ── storage ──────────────────────────────────────────────────────────
 	 * Wrapped because a private window, or a browser set to block site data,
@@ -1781,9 +1784,47 @@
 		a.href = CFG.chatUrl || '/';
 		a.addEventListener('click', function () {
 			write(SESSION_KEY, { id: sessionId });
+			write(OPEN_KEY, { at: Date.now() });
 		});
 		return a;
 	};
+
+	/**
+	 * The chat on this site is an Elementor popup, which only opens on a
+	 * click. A client sent here from their consultations page would land on
+	 * the home page with the right conversation loaded inside a popup they
+	 * cannot see. So when the flag is set, open it for them.
+	 *
+	 * By popup id when configured; otherwise by pressing whatever link on
+	 * the page opens a popup, which on a page whose only popup is the chat
+	 * is the "ask the assistant" button. Elementor initialises after this
+	 * file, so poll for it briefly rather than assume.
+	 */
+	function openChatPopup() {
+		var flag = read(OPEN_KEY);
+		if (!flag) return;
+		write(OPEN_KEY, null);
+		// A flag older than a minute is a stale leftover, not an intent.
+		if (!flag.at || Date.now() - flag.at > 60000) return;
+
+		var tries = 0;
+		function attempt() {
+			tries += 1;
+			var pro = window.elementorProFrontend;
+			var popups = pro && pro.modules && pro.modules.popup;
+			if (CFG.chatPopupId && popups && typeof popups.showPopup === 'function') {
+				popups.showPopup({ id: Number(CFG.chatPopupId) });
+				return;
+			}
+			var trigger = document.querySelector('a[href*="elementor-action"][href*="popup:open"]');
+			if (trigger && popups) {
+				trigger.click();
+				return;
+			}
+			if (tries < 40) window.setTimeout(attempt, 150);
+		}
+		attempt();
+	}
 
 	function fmtDate(iso) {
 		if (!iso) return '';
@@ -1857,6 +1898,7 @@
 	function start() {
 		boot();
 		watch();
+		openChatPopup();
 	}
 
 	if (document.readyState === 'loading') {

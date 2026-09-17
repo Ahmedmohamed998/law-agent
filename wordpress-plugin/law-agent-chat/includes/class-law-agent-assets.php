@@ -92,6 +92,7 @@ class Law_Agent_Assets {
 					// where its list lives (empty without WooCommerce).
 					'chatUrl'         => $o['chat_url'] ? $o['chat_url'] : home_url( '/' ),
 					'accountUrl'      => Law_Agent_Account::list_url(),
+					'chatPopupId'     => (int) $o['chat_popup_id'],
 					'voiceEnabled'    => (bool) $o['voice_enabled'],
 					// Must match VOICE_MAX_SECONDS on the AI service, which
 					// refuses longer recordings. The widget stops here so a
