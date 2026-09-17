@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import './App.css';
 import CaseDetail from './CaseDetail';
+import Services from './Services';
 
 // --- Types ---
 interface DashboardStats {
@@ -19,6 +20,24 @@ interface DashboardStats {
   pending_consultations: number;
   failed_payments: number;
   total_revenue_cents: number;
+  by_service: Array<{
+    service_id: string;
+    service_name: string;
+    orders: number;
+    paid: number;
+    revenue_cents: number;
+  }>;
+}
+
+/** One order's status, as a badge class. Paid and its two work states are all "good". */
+export function statusBadge(status: string): string {
+  if (status === 'paid' || status === 'in_progress' || status === 'completed') return 'badge-success';
+  if (status === 'pending') return 'badge-warning';
+  return 'badge-danger';
+}
+
+export function statusLabel(status: string): string {
+  return status.replace('_', ' ').toUpperCase();
 }
 
 interface User {
@@ -41,6 +60,11 @@ interface Payment {
 interface Consultation {
   consultation_id: string;
   status: string;
+  service_id: string;
+  service_slug: string | null;
+  service_name: string;
+  needs_conversation: boolean;
+  client_notes: string | null;
   amount_cents: number;
   currency: string;
   ai_session_id: string | null;
@@ -138,6 +162,10 @@ function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   // The case being viewed, or null for the overview.
   const [selectedCase, setSelectedCase] = useState<string | null>(null);
+  const [page, setPage] = useState<'orders' | 'services'>('orders');
+  // Filters on the orders table. Empty means all.
+  const [serviceFilter, setServiceFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
 
   // Resume a stored session on load. A dead one just shows the login form.
   useEffect(() => {
@@ -325,6 +353,12 @@ function App() {
             <ShieldCheck className="brand-icon" />
             Law Agent Admin
           </div>
+          <nav className="top-nav">
+            <button className={`nav-btn ${page === 'orders' ? 'is-active' : ''}`}
+                    onClick={() => { setPage('orders'); setSelectedCase(null); }}>Orders</button>
+            <button className={`nav-btn ${page === 'services' ? 'is-active' : ''}`}
+                    onClick={() => { setPage('services'); setSelectedCase(null); }}>Services</button>
+          </nav>
           <div className="user-controls">
             <button className="logout-btn" onClick={handleLogout}>
               <LogOut size={16} style={{marginRight: 6, display: 'inline', verticalAlign: 'text-bottom'}}/>
@@ -336,12 +370,15 @@ function App() {
 
       <main className="main-content">
         <div className="container">
-          {selectedCase ? (
+          {page === 'services' ? (
+            <Services backend={BACKEND} authHeaders={authHeaders} formatMoney={formatMoney} />
+          ) : selectedCase ? (
             <CaseDetail
               consultationId={selectedCase}
               backend={BACKEND}
               authHeaders={authHeaders}
               onBack={() => setSelectedCase(null)}
+              onChanged={() => { const s = session ?? loadSession(); if (s) loadData(s).catch(() => undefined); }}
               formatMoney={formatMoney}
               formatDate={formatDate}
             />
@@ -349,7 +386,7 @@ function App() {
           <>
           <div className="page-header animate-fade-in delay-1">
             <h1 className="page-title">Overview</h1>
-            <p className="page-subtitle">Real-time consultation and revenue metrics.</p>
+            <p className="page-subtitle">Orders and revenue, by service.</p>
           </div>
 
           {isLoading && !stats ? (
@@ -370,7 +407,7 @@ function App() {
               
               <div className="stat-card glass-panel">
                 <div className="stat-header">
-                  <span>Paid Consultations</span>
+                  <span>Paid Orders</span>
                   <ShieldCheck className="stat-icon" size={20} />
                 </div>
                 <div className="stat-value">{stats.paid_consultations}</div>
@@ -386,7 +423,7 @@ function App() {
 
               <div className="stat-card glass-panel">
                 <div className="stat-header">
-                  <span>Total Users (Consults)</span>
+                  <span>All Orders</span>
                   <Users className="stat-icon" size={20} />
                 </div>
                 <div className="stat-value">{stats.total_consultations}</div>
@@ -394,8 +431,41 @@ function App() {
             </div>
           ) : null}
 
-          <div className="page-header animate-fade-in delay-3" style={{marginTop: 48, marginBottom: 24}}>
-            <h2 className="page-title" style={{fontSize: '1.5rem'}}>Recent Consultations</h2>
+          {stats && stats.by_service.length > 0 && (
+            <div className="service-strip animate-fade-in delay-2">
+              {stats.by_service.map((b) => (
+                <button
+                  key={b.service_id}
+                  className={`service-chip ${serviceFilter === b.service_id ? 'is-active' : ''}`}
+                  onClick={() => setServiceFilter(serviceFilter === b.service_id ? '' : b.service_id)}
+                  title="Filter the table by this service"
+                >
+                  <span className="service-chip-name" dir="rtl">{b.service_name}</span>
+                  <span className="service-chip-meta">
+                    {b.paid} paid · {formatMoney(b.revenue_cents)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="page-header animate-fade-in delay-3 orders-header" style={{marginTop: 48, marginBottom: 24}}>
+            <h2 className="page-title" style={{fontSize: '1.5rem'}}>Recent Orders</h2>
+            <div className="filters">
+              <select className="input-field filter-select" value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)} aria-label="Status">
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="paid">Paid</option>
+                <option value="in_progress">In progress</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="refunded">Refunded</option>
+              </select>
+              {serviceFilter && (
+                <button className="open-btn" onClick={() => setServiceFilter('')}>Clear service filter</button>
+              )}
+            </div>
           </div>
 
           <div className="table-container animate-fade-in delay-3">
@@ -403,15 +473,19 @@ function App() {
               <thead>
                 <tr>
                   <th>Client</th>
+                  <th>Service</th>
                   <th>Amount</th>
                   <th>Status</th>
-                  <th>Escalation</th>
+                  <th>Handover</th>
                   <th>Date</th>
                   <th><span className="sr-only">Open</span></th>
                 </tr>
               </thead>
               <tbody>
-                {consultations.map(c => (
+                {consultations
+                  .filter((c) => !serviceFilter || c.service_id === serviceFilter)
+                  .filter((c) => !statusFilter || c.status === statusFilter)
+                  .map(c => (
                   <tr
                     key={c.consultation_id}
                     className="row-clickable"
@@ -439,21 +513,24 @@ function App() {
                         )}
                       </div>
                     </td>
+                    <td>
+                      <span className="service-name" dir="rtl">{c.service_name}</span>
+                      {c.client_notes && (
+                        <div className="case-summary" dir="rtl" title={c.client_notes}>{c.client_notes}</div>
+                      )}
+                    </td>
                     <td className="amount-cell">{formatMoney(c.amount_cents, c.currency)}</td>
                     <td>
-                      <span className={`badge ${
-                        c.status === 'paid' ? 'badge-success' : 
-                        c.status === 'pending' ? 'badge-warning' : 'badge-danger'
-                      }`}>
-                        {c.status.toUpperCase()}
+                      <span className={`badge ${statusBadge(c.status)}`}>
+                        {statusLabel(c.status)}
                       </span>
                     </td>
                     <td>
-                      {c.status !== 'paid' ? (
+                      {c.status === 'pending' || c.status === 'cancelled' || c.status === 'refunded' ? (
                         <span className="badge badge-neutral">—</span>
                       ) : c.escalated ? (
-                        <span className="badge badge-success">Escalated</span>
-                      ) : !c.ai_session_id ? (
+                        <span className="badge badge-success">{c.needs_conversation ? 'Escalated' : 'Received'}</span>
+                      ) : !c.ai_session_id || !c.needs_conversation ? (
                         // Bought without a conversation attached. There is
                         // nothing to hand over, so this is complete — not the
                         // "money taken, service not delivered" case the red
@@ -485,8 +562,8 @@ function App() {
                 
                 {consultations.length === 0 && !isLoading && (
                   <tr>
-                    <td colSpan={6} style={{textAlign: 'center', color: 'var(--text-muted)'}}>
-                      No consultations found.
+                    <td colSpan={7} style={{textAlign: 'center', color: 'var(--text-muted)'}}>
+                      No orders found.
                     </td>
                   </tr>
                 )}

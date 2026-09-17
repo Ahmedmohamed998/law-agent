@@ -528,3 +528,69 @@
   line-height: 1.75;
   unicode-bidi: plaintext;
 }
+
+/* ── navigation, services, filters ───────────────────────────────── */
+
+.top-nav { display: flex; gap: 4px; margin-inline-start: 24px; }
+
+.nav-btn {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav-btn:hover { color: var(--text-primary); }
+.nav-btn.is-active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
+
+.services-header, .orders-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.filters { display: flex; gap: 8px; align-items: center; }
+.filter-select { width: auto; padding: 8px 12px; }
+
+.service-strip { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+
+.service-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.service-chip:hover { border-color: var(--accent); }
+.service-chip.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.service-chip-name { font-weight: 700; }
+.service-chip-meta { font-size: 0.8rem; color: var(--text-secondary); }
+
+.service-name { font-weight: 600; }
+
+.row-inactive { opacity: 0.6; }
+
+.service-form { margin-bottom: 24px; }
+.service-form .input-group { margin-bottom: 14px; }
+.service-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 16px; }
+.service-flags { display: grid; gap: 8px; margin: 6px 0 16px; color: var(--text-secondary); font-size: 0.9rem; }
+.service-flags label { display: flex; gap: 8px; align-items: flex-start; }
+.service-form-actions { display: flex; gap: 10px; align-items: center; }
+.service-form-actions .submit-btn { width: auto; padding: 10px 18px; }
+.service-actions { white-space: nowrap; }
+.service-actions .open-btn + .open-btn { margin-inline-start: 6px; }
+
+.status-actions { display: flex; align-items: center; gap: 10px; margin: -8px 0 20px; flex-wrap: wrap; }

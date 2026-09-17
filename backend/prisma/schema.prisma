@@ -88,6 +88,29 @@ model users {
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// The catalogue. Edited in the dashboard, read by the site and the AI
+/// service's suggestions. Never deleted: orders reference rows here.
+model services {
+  id                 String          @id @db.VarChar(32)
+  slug               String          @unique(map: "uq_services_slug") @db.VarChar(64)
+  name_ar            String          @db.VarChar(160)
+  description_ar     String          @default("")
+  price_cents        Int
+  currency           String          @default("SAR") @db.VarChar(3)
+  active             Boolean         @default(true)
+  sort_order         Int             @default(100)
+  needs_conversation Boolean         @default(false)
+  needs_notes        Boolean         @default(false)
+  ai_hint            String          @default("")
+  suggestable        Boolean         @default(true)
+  created_at         DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime        @default(now()) @db.Timestamptz(6)
+  consultations      consultations[]
+
+  @@index([active, sort_order], map: "ix_services_active")
+}
+
+/// The orders table. Named for what it used to be the only kind of.
 model consultations {
   id               String     @id @db.VarChar(32)
   user_id          String     @db.VarChar(32)
@@ -101,11 +124,17 @@ model consultations {
   escalation_error String?
   chat_language    String?    @db.VarChar(16)
   escalation_summary String?  @db.Text
+  /// Snapshots at purchase: a service edited later must not rewrite history.
+  service_id       String     @db.VarChar(32)
+  service_name     String     @db.VarChar(160)
+  client_notes     String?    @db.Text
   users            users      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  services         services   @relation(fields: [service_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   payments         payments[]
 
   @@index([paid_at], map: "ix_consultations_unescalated", where: raw("(((status)::text = 'paid'::text) AND (escalated_at IS NULL))"))
   @@index([user_id, created_at(sort: Desc)], map: "ix_consultations_user")
+  @@index([service_id, created_at(sort: Desc)], map: "ix_consultations_service")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.

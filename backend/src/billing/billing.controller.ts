@@ -4,12 +4,23 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { IsOptional, IsString, Length } from "class-validator";
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+  Max,
+  Min,
+} from "class-validator";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 
@@ -22,21 +33,37 @@ import {
   type Caller,
 } from "../auth/auth.guard";
 import { AiService, type StaffConversation } from "../ai/ai.service";
+import { AppError } from "../common/errors";
 import { BillingService, type AdminConsultationRow, type ConsultationOut, type DashboardStats } from "./billing.service";
 import { PaymobService, type PaymobTransaction } from "./paymob.service";
-import { loadConfig } from "../config/configuration";
+import { ServicesService, type ServiceOut } from "./services.service";
 
 /**
  * What the buyer gets to choose. Note what is absent: the price.
  *
  * `amount_cents` and `currency` used to be fields here, bounded but
  * client-supplied — so the amount charged was whatever the browser sent, and
- * anyone could open devtools and buy a 500 SAR consultation for 1.00. They now
- * come from configuration. Because the global ValidationPipe runs with
- * `forbidNonWhitelisted`, an old client still sending them gets a 422 that
- * names the field rather than a silently ignored price.
+ * anyone could open devtools and buy a 500 SAR consultation for 1.00. The
+ * price now comes from the service row. Because the global ValidationPipe
+ * runs with `forbidNonWhitelisted`, an old client still sending them gets a
+ * 422 that names the field rather than a silently ignored price.
  */
 export class CreateConsultationDto {
+  /**
+   * Which service. Id or slug. Optional for one release: a plugin from
+   * before the catalogue existed sends nothing and means a consultation.
+   */
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  service_id?: string;
+
+  /** The client's description of the case, for services that ask for one. */
+  @IsOptional()
+  @IsString()
+  @Length(0, 4000)
+  client_notes?: string;
+
   /** The conversation a lawyer would take over. Optional: someone can buy a
    * consultation without having chatted first. */
   @IsOptional()
@@ -55,36 +82,108 @@ export class CreateConsultationDto {
   phone?: string;
 }
 
+/** Every field optional so the same shape serves create and partial update. */
+export class ServiceDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+  @Length(2, 64)
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 160)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 4000)
+  description?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100_000_000)
+  price_cents?: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currency?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10_000)
+  sort_order?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  needs_conversation?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  needs_notes?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 2000)
+  ai_hint?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  suggestable?: boolean;
+}
+
+export class UpdateOrderStatusDto {
+  @IsIn(["in_progress", "completed", "cancelled"])
+  status!: string;
+}
+
+/**
+ * The catalogue, as the site and the AI service read it.
+ *
+ * No guard, on purpose: a price list is public information, the site shows
+ * it to visitors who have no token yet, and the AI service fetches it with
+ * no user in hand. Nothing here can be changed through this controller.
+ */
+@Controller("services")
+export class ServicesController {
+  constructor(private readonly services: ServicesService) {}
+
+  @Get()
+  list(): Promise<ServiceOut[]> {
+    return this.services.listPublic();
+  }
+}
+
 @Controller("consultations")
 @UseGuards(AuthGuard)
 export class ConsultationsController {
-  private readonly config = loadConfig();
-
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly services: ServicesService,
+  ) {}
 
   /**
-   * What a consultation costs.
+   * What a consultation costs — the default service's price.
    *
-   * Declared before `:id` so Nest does not route "price" into the lookup.
-   *
-   * The frontend needs a number to put on the button, and the only safe way
-   * to give it one is to serve the same number the charge is built from. A
-   * price rendered from the client's own config is a price that can disagree
-   * with the invoice.
-   *
-   * Authenticated but not registered-only: an anonymous visitor sees the
-   * offer before they have an account, which is the whole funnel.
+   * Kept for the plugin release that predates the catalogue; new clients read
+   * GET /services. Declared before `:id` so Nest does not route "price" into
+   * the lookup.
    */
   @Get("price")
-  price() {
-    return {
-      amount_cents: this.config.consultationPriceCents,
-      currency: this.config.consultationCurrency,
-    };
+  async price() {
+    const svc = await this.services.forPurchase(undefined);
+    return { amount_cents: svc.price_cents, currency: svc.currency };
   }
 
   /**
-   * Buy a consultation.
+   * Buy a service.
    *
    * Registered users only. An anonymous visitor can ask questions, but paying
    * for a lawyer's time needs an account to attach the result to.
@@ -93,14 +192,20 @@ export class ConsultationsController {
   @HttpCode(201)
   @UseGuards(RegisteredGuard)
   async create(@CurrentCaller() caller: Caller, @Body() body: CreateConsultationDto) {
-    await this.billing.assertNoOpenConsultation(caller.userId, body.ai_session_id);
+    // The row the price comes from. Inactive or unknown stops here.
+    const service = await this.services.forPurchase(body.service_id);
+
+    if (service.needs_notes && !(body.client_notes ?? "").trim()) {
+      throw new AppError(400, "notes_required", "this service needs a description of the case");
+    }
+
+    await this.billing.assertNoOpenConsultation(caller.userId, service.service_id, body.ai_session_id);
 
     const { consultation, paymentKey } = await this.billing.createConsultation({
       userId: caller.userId,
+      service,
       aiSessionId: body.ai_session_id,
-      // From configuration, never from the request.
-      amountCents: this.config.consultationPriceCents,
-      currency: this.config.consultationCurrency,
+      clientNotes: body.client_notes,
       billing: {
         first_name: (body.full_name ?? "Client").split(" ")[0],
         last_name: (body.full_name ?? "Client").split(" ").slice(1).join(" ") || "Client",
@@ -191,6 +296,7 @@ export class BillingAdminController {
   constructor(
     private readonly billing: BillingService,
     private readonly ai: AiService,
+    private readonly servicesRepo: ServicesService,
   ) {}
 
   /** Paid but never handed to a lawyer. The queue that must not grow. */
@@ -206,20 +312,49 @@ export class BillingAdminController {
   }
 
   /**
-   * Full consultation list for the admin dashboard.
-   * Supports optional ?status=paid|pending and pagination.
+   * Full order list for the admin dashboard.
+   * Optional ?status=…, ?service=<id|slug>, and pagination.
    */
   @Get("consultations")
   listAll(
     @Query("status") status?: string,
+    @Query("service") service?: string,
     @Query("limit") limit?: string,
     @Query("offset") offset?: string,
   ): Promise<AdminConsultationRow[]> {
     return this.billing.listAll({
       status,
+      service,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
+  }
+
+  /** A lawyer moving the work along: in_progress, completed, or cancelled. */
+  @Patch("consultations/:id/status")
+  setStatus(
+    @Param("id") id: string,
+    @Body() body: UpdateOrderStatusDto,
+  ): Promise<AdminConsultationRow> {
+    return this.billing.updateStatus(id, body.status);
+  }
+
+  // ── the catalogue ──────────────────────────────────────────────────────
+
+  @Get("services")
+  services(): Promise<ServiceOut[]> {
+    return this.servicesRepo.listAll();
+  }
+
+  @Post("services")
+  @HttpCode(201)
+  createService(@Body() body: ServiceDto): Promise<ServiceOut> {
+    return this.servicesRepo.create(body);
+  }
+
+  @Patch("services/:id")
+  updateService(@Param("id") id: string, @Body() body: ServiceDto): Promise<ServiceOut> {
+    return this.servicesRepo.update(id, body);
   }
 
   /**

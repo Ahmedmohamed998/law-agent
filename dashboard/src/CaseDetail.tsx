@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Loader2, Mic, AlertCircle } from 'lucide-react';
+import { statusBadge, statusLabel } from './App';
 
 /**
  * One case: who, what they paid, whether a lawyer has it, and the conversation.
@@ -44,6 +45,11 @@ interface Conversation {
 interface CaseRecord {
   consultation_id: string;
   status: string;
+  service_id: string;
+  service_slug: string | null;
+  service_name: string;
+  needs_conversation: boolean;
+  client_notes: string | null;
   amount_cents: number;
   currency: string;
   ai_session_id: string | null;
@@ -78,9 +84,19 @@ interface Props {
   backend: string;
   authHeaders: () => Promise<Record<string, string>>;
   onBack: () => void;
+  /** The list behind this page should refresh after a status change. */
+  onChanged?: () => void;
   formatMoney: (cents: number, currency?: string) => string;
   formatDate: (value: string) => string;
 }
+
+/** Which statuses a lawyer may move an order to, from where it is. */
+const NEXT: Record<string, Array<{ to: string; label: string }>> = {
+  pending: [{ to: 'cancelled', label: 'Cancel order' }],
+  paid: [{ to: 'in_progress', label: 'Start work' }, { to: 'completed', label: 'Mark completed' }],
+  in_progress: [{ to: 'completed', label: 'Mark completed' }],
+  completed: [{ to: 'in_progress', label: 'Reopen' }],
+};
 
 async function readEnvelope(res: Response): Promise<any> {
   const text = await res.text();
@@ -97,11 +113,34 @@ async function readEnvelope(res: Response): Promise<any> {
 }
 
 export default function CaseDetail({
-  consultationId, backend, authHeaders, onBack, formatMoney, formatDate,
+  consultationId, backend, authHeaders, onBack, onChanged, formatMoney, formatDate,
 }: Props) {
   const [record, setRecord] = useState<CaseRecord | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [changing, setChanging] = useState(false);
+
+  const setStatus = async (to: string) => {
+    if (!record) return;
+    if (to === 'cancelled' && !window.confirm('Cancel this unpaid order?')) return;
+    setChanging(true);
+    setError('');
+    try {
+      const headers = { ...(await authHeaders()), 'Content-Type': 'application/json' };
+      const updated = await fetch(
+        `${backend}/admin/billing/consultations/${encodeURIComponent(record.consultation_id)}/status`,
+        { method: 'PATCH', headers, body: JSON.stringify({ status: to }) },
+      ).then(readEnvelope);
+      // The status route returns the order without the conversation; keep
+      // what we already have of it.
+      setRecord({ ...record, ...updated });
+      onChanged?.();
+    } catch (err: any) {
+      setError(err.message || 'Could not change the status.');
+    } finally {
+      setChanging(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -126,9 +165,13 @@ export default function CaseDetail({
   }, [consultationId]);
 
   const handover = (r: CaseRecord) => {
-    if (r.status !== 'paid') return <span className="badge badge-neutral">Not paid</span>;
-    if (r.escalated) return <span className="badge badge-success">With a lawyer</span>;
-    if (!r.ai_session_id) return <span className="badge badge-neutral">No conversation</span>;
+    if (r.status === 'pending' || r.status === 'cancelled' || r.status === 'refunded') {
+      return <span className="badge badge-neutral">Not paid</span>;
+    }
+    if (r.escalated) {
+      return <span className="badge badge-success">{r.needs_conversation ? 'With a lawyer' : 'Received'}</span>;
+    }
+    if (!r.ai_session_id || !r.needs_conversation) return <span className="badge badge-neutral">Nothing to hand over</span>;
     return (
       <span className="badge badge-danger" title={r.escalation_error || ''}>
         Not handed over
@@ -139,7 +182,7 @@ export default function CaseDetail({
   return (
     <div className="case-page animate-fade-in">
       <button className="back-btn" onClick={onBack}>
-        <ArrowLeft size={16} /> All consultations
+        <ArrowLeft size={16} /> All orders
       </button>
 
       {loading && (
@@ -155,9 +198,20 @@ export default function CaseDetail({
           <div className="page-header">
             <h1 className="page-title">{record.user?.display_name || 'Client'}</h1>
             <p className="page-subtitle">
-              Case {record.consultation_id} · opened {formatDate(record.created_at)}
+              <span dir="rtl">{record.service_name}</span> · Case {record.consultation_id} · opened {formatDate(record.created_at)}
             </p>
           </div>
+
+          {(NEXT[record.status] ?? []).length > 0 && (
+            <div className="status-actions">
+              <span className={`badge ${statusBadge(record.status)}`}>{statusLabel(record.status)}</span>
+              {(NEXT[record.status] ?? []).map((n) => (
+                <button key={n.to} className="open-btn" disabled={changing} onClick={() => setStatus(n.to)}>
+                  {changing ? <Loader2 size={13} className="animate-spin" /> : n.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="case-grid">
             <section className="case-card">
@@ -181,11 +235,11 @@ export default function CaseDetail({
               <h2 className="case-card-title">Payment</h2>
               <dl className="facts">
                 <dt>Amount</dt><dd className="amount-cell">{formatMoney(record.amount_cents, record.currency)}</dd>
+                <dt>Service</dt><dd dir="rtl">{record.service_name}</dd>
                 <dt>Status</dt>
                 <dd>
-                  <span className={`badge ${record.status === 'paid' ? 'badge-success'
-                    : record.status === 'pending' ? 'badge-warning' : 'badge-danger'}`}>
-                    {record.status.toUpperCase()}
+                  <span className={`badge ${statusBadge(record.status)}`}>
+                    {statusLabel(record.status)}
                   </span>
                 </dd>
                 <dt>Paid</dt><dd>{record.paid_at ? formatDate(record.paid_at) : '—'}</dd>
@@ -214,6 +268,13 @@ export default function CaseDetail({
             </section>
           </div>
 
+          {record.client_notes && (
+            <section className="case-card case-summary-card">
+              <h2 className="case-card-title">The client's description</h2>
+              <p className="case-summary-text" dir="auto">{record.client_notes}</p>
+            </section>
+          )}
+
           {record.escalation_summary && (
             <section className="case-card case-summary-card">
               <h2 className="case-card-title">Summary for the lawyer</h2>
@@ -225,7 +286,7 @@ export default function CaseDetail({
             <h2 className="case-card-title">Transcript</h2>
 
             {!record.ai_session_id && (
-              <p className="muted">This consultation was bought without a conversation.</p>
+              <p className="muted">This order was placed without a conversation.</p>
             )}
 
             {record.conversation_error && (

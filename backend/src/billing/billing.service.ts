@@ -23,12 +23,18 @@ import { conflict, notFound } from "../common/errors";
 import { newId } from "../common/ids";
 import { PrismaService } from "../prisma/prisma.service";
 import { PaymobService, type PaymobTransaction } from "./paymob.service";
+import type { ServiceOut } from "./services.service";
 
 const PROVIDER = "paymob";
 
 export interface ConsultationOut {
   consultation_id: string;
   status: string;
+  /** What was bought, as it was at the time. */
+  service_id: string;
+  service_slug: string | null;
+  service_name: string;
+  client_notes: string | null;
   amount_cents: number;
   currency: string;
   ai_session_id: string | null;
@@ -54,6 +60,9 @@ export class BillingService {
   private shape(row: {
     id: string;
     status: string;
+    service_id: string;
+    service_name: string;
+    client_notes: string | null;
     amount_cents: number;
     currency: string;
     ai_session_id: string | null;
@@ -62,10 +71,15 @@ export class BillingService {
     escalated_at: Date | null;
     chat_language: string | null;
     escalation_summary: string | null;
+    services?: { slug: string } | null;
   }): ConsultationOut {
     return {
       consultation_id: row.id,
       status: row.status,
+      service_id: row.service_id,
+      service_slug: row.services?.slug ?? null,
+      service_name: row.service_name,
+      client_notes: row.client_notes,
       amount_cents: row.amount_cents,
       currency: row.currency,
       ai_session_id: row.ai_session_id,
@@ -80,36 +94,43 @@ export class BillingService {
   }
 
   /**
-   * Start a consultation. Creates the row, then asks Paymob for a checkout.
+   * Start an order. Creates the row, then asks Paymob for a checkout.
    *
    * The row exists before the gateway is contacted so the callback always has
    * something to match against — a webhook arriving for an order we have no
    * record of is unresolvable, and gateways can be faster than you expect.
+   *
+   * The amount is the service's price, copied onto the row along with the
+   * name: the catalogue can change tomorrow, the order cannot.
    */
   async createConsultation(params: {
     userId: string;
+    service: ServiceOut;
     aiSessionId?: string;
-    amountCents: number;
-    currency: string;
+    clientNotes?: string;
     billing: Record<string, string>;
   }): Promise<{ consultation: ConsultationOut; paymentKey: string | null }> {
     const row = await this.prisma.consultations.create({
       data: {
         id: newId(),
         user_id: params.userId,
+        service_id: params.service.service_id,
+        service_name: params.service.name,
+        client_notes: params.clientNotes?.trim() || null,
         ai_session_id: params.aiSessionId ?? null,
-        amount_cents: params.amountCents,
-        currency: params.currency,
+        amount_cents: params.service.price_cents,
+        currency: params.service.currency,
         status: "pending",
       },
+      include: { services: { select: { slug: true } } },
     });
 
     let paymentKey: string | null = null;
     if (this.paymob.configured) {
       const checkout = await this.paymob.createCheckout({
         merchantOrderId: row.id,
-        amountCents: params.amountCents,
-        currency: params.currency,
+        amountCents: params.service.price_cents,
+        currency: params.service.currency,
         billing: params.billing,
       });
       paymentKey = checkout.paymentKey;
@@ -130,6 +151,7 @@ export class BillingService {
       where: { user_id: userId },
       orderBy: { created_at: "desc" },
       take: 50,
+      include: { services: { select: { slug: true } } },
     });
     return rows.map((r) => this.shape(r));
   }
@@ -137,6 +159,7 @@ export class BillingService {
   async getForUser(userId: string, id: string): Promise<ConsultationOut> {
     const row = await this.prisma.consultations.findFirst({
       where: { id, user_id: userId },
+      include: { services: { select: { slug: true } } },
     });
     // Same 404 whether it never existed or belongs to someone else.
     if (!row) throw notFound("consultation_not_found", "no such consultation");
@@ -309,8 +332,22 @@ export class BillingService {
     sessionId: string | null,
   ): Promise<void> {
     if (!sessionId) {
-      // A consultation bought outside a conversation is legitimate — there is
+      // An order bought outside a conversation is legitimate — there is
       // simply nothing to escalate.
+      return;
+    }
+    // A service the lawyer handles from the client's notes alone (a contract
+    // review) leaves the conversation open: the client may keep asking, and
+    // no summary is owed. Only conversation-based services lock the chat.
+    const order = await this.prisma.consultations.findUnique({
+      where: { id: consultationId },
+      include: { services: { select: { needs_conversation: true } } },
+    });
+    if (order && !order.services.needs_conversation) {
+      await this.prisma.consultations.update({
+        where: { id: consultationId },
+        data: { escalated_at: new Date(), escalation_error: null },
+      });
       return;
     }
     const { delivered, error, data } = await this.ai.escalateSession(sessionId);
@@ -358,18 +395,66 @@ export class BillingService {
     return rows.map((r) => this.shape(r));
   }
 
-  /** Guard against double-buying the same conversation. */
-  async assertNoOpenConsultation(userId: string, sessionId?: string): Promise<void> {
-    if (!sessionId) return;
+  /**
+   * Guard against buying the same thing twice.
+   *
+   * Open means paid or in progress, or pending and recent — a checkout the
+   * client abandoned an hour ago must not block them from trying again, so
+   * pending only counts for a short while. Scoped per service: a contract
+   * review and a consultation on the same conversation are two orders.
+   */
+  async assertNoOpenConsultation(
+    userId: string,
+    serviceId: string,
+    sessionId?: string,
+  ): Promise<void> {
+    const recent = new Date(Date.now() - BillingService.PENDING_HOLD_MS);
     const existing = await this.prisma.consultations.findFirst({
-      where: { user_id: userId, ai_session_id: sessionId, status: { in: ["pending", "paid"] } },
+      where: {
+        user_id: userId,
+        service_id: serviceId,
+        ...(sessionId ? { ai_session_id: sessionId } : {}),
+        OR: [
+          { status: { in: ["paid", "in_progress"] } },
+          { status: "pending", created_at: { gte: recent } },
+        ],
+      },
     });
     if (existing) {
       throw conflict(
         "consultation_exists",
-        "a consultation is already open for this conversation",
+        "an order for this service is already open" +
+          (sessionId ? " for this conversation" : ""),
       );
     }
+  }
+
+  /** How long an unpaid checkout reserves "one open order per service". */
+  private static readonly PENDING_HOLD_MS = 30 * 60 * 1000;
+
+  /**
+   * A lawyer moving the work along. Only states that describe work are
+   * settable here; the ones that describe money (paid, refunded) come from
+   * the webhook, and cancelling applies to an unpaid order only.
+   */
+  async updateStatus(id: string, status: string): Promise<AdminConsultationRow> {
+    const row = await this.prisma.consultations.findUnique({ where: { id } });
+    if (!row) throw notFound("consultation_not_found", "no such consultation");
+
+    const allowed: Record<string, string[]> = {
+      pending: ["cancelled"],
+      paid: ["in_progress", "completed"],
+      in_progress: ["completed"],
+      completed: ["in_progress"],
+    };
+    if (!(allowed[row.status] ?? []).includes(status)) {
+      throw conflict(
+        "invalid_transition",
+        "cannot move an order from " + row.status + " to " + status,
+      );
+    }
+    await this.prisma.consultations.update({ where: { id }, data: { status } });
+    return this.getForAdmin(id);
   }
 
   // ── Admin dashboard methods ────────────────────────────────────────────────
@@ -380,10 +465,17 @@ export class BillingService {
    */
   async listAll(params: {
     status?: string;
+    service?: string;
     limit?: number;
     offset?: number;
   }): Promise<AdminConsultationRow[]> {
-    const where = params.status ? { status: params.status } : {};
+    const where = {
+      ...(params.status ? { status: params.status } : {}),
+      // By id or slug, whichever the dashboard has to hand.
+      ...(params.service
+        ? { services: { OR: [{ id: params.service }, { slug: params.service }] } }
+        : {}),
+    };
     const rows = await this.prisma.consultations.findMany({
       where,
       orderBy: { created_at: "desc" },
@@ -423,12 +515,18 @@ export class BillingService {
       orderBy: { created_at: "desc" as const },
       take: 1,
     },
+    services: { select: { slug: true, needs_conversation: true } },
   };
 
   private static adminRow(r: any): AdminConsultationRow {
     return {
       consultation_id: r.id,
       status: r.status,
+      service_id: r.service_id,
+      service_slug: r.services?.slug ?? null,
+      service_name: r.service_name,
+      needs_conversation: r.services?.needs_conversation ?? false,
+      client_notes: r.client_notes ?? null,
       amount_cents: r.amount_cents,
       currency: r.currency,
       ai_session_id: r.ai_session_id,
@@ -465,7 +563,7 @@ export class BillingService {
   async stats(): Promise<DashboardStats> {
     const [total, paid, pending, failed] = await Promise.all([
       this.prisma.consultations.count(),
-      this.prisma.consultations.count({ where: { status: "paid" } }),
+      this.prisma.consultations.count({ where: { status: { in: ["paid", "in_progress", "completed"] } } }),
       this.prisma.consultations.count({ where: { status: "pending" } }),
       this.prisma.payments.count({ where: { status: "failed" } }),
     ]);
@@ -475,12 +573,36 @@ export class BillingService {
       where: { status: "success" },
     });
 
+    // Per service: how many were ordered, how many paid, and what they
+    // brought in. Revenue from the order's own amount once it is past
+    // pending — the same figure the payment row carries, without a join.
+    const byService = await this.prisma.consultations.groupBy({
+      by: ["service_id", "service_name"],
+      _count: { _all: true },
+    });
+    const paidByService = await this.prisma.consultations.groupBy({
+      by: ["service_id"],
+      where: { status: { in: ["paid", "in_progress", "completed"] } },
+      _count: { _all: true },
+      _sum: { amount_cents: true },
+    });
+    const paidMap = new Map(paidByService.map((p) => [p.service_id, p]));
+
     return {
       total_consultations: total,
       paid_consultations: paid,
       pending_consultations: pending,
       failed_payments: failed,
       total_revenue_cents: revenueAgg._sum.amount_cents ?? 0,
+      by_service: byService
+        .map((b) => ({
+          service_id: b.service_id,
+          service_name: b.service_name,
+          orders: b._count._all,
+          paid: paidMap.get(b.service_id)?._count._all ?? 0,
+          revenue_cents: paidMap.get(b.service_id)?._sum.amount_cents ?? 0,
+        }))
+        .sort((a, b) => b.revenue_cents - a.revenue_cents),
     };
   }
 }
@@ -490,6 +612,11 @@ export class BillingService {
 export interface AdminConsultationRow {
   consultation_id: string;
   status: string;
+  service_id: string;
+  service_slug: string | null;
+  service_name: string;
+  needs_conversation: boolean;
+  client_notes: string | null;
   amount_cents: number;
   currency: string;
   ai_session_id: string | null;
@@ -521,5 +648,12 @@ export interface DashboardStats {
   pending_consultations: number;
   failed_payments: number;
   total_revenue_cents: number;
+  by_service: Array<{
+    service_id: string;
+    service_name: string;
+    orders: number;
+    paid: number;
+    revenue_cents: number;
+  }>;
 }
 
