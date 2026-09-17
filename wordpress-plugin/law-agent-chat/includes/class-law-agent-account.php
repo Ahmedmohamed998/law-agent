@@ -1,7 +1,7 @@
 <?php
 /**
- * "استشاراتي" -- the signed-in client's consultations, in WooCommerce's
- * My Account and as a shortcode.
+ * "طلباتي" -- the signed-in client's orders (consultations and every other
+ * service), in WooCommerce's My Account and as a shortcode.
  *
  * Rendered in the browser from GET /consultations on the product backend,
  * with the visitor's own token -- the same token the chat widget holds. PHP
@@ -66,7 +66,7 @@ class Law_Agent_Account {
 	}
 
 	public static function title() {
-		return __( 'استشاراتي', 'law-agent-chat' );
+		return __( 'طلباتي', 'law-agent-chat' );
 	}
 
 	/** The endpoint's value is a consultation id, or empty for the list. */
@@ -99,7 +99,7 @@ class Law_Agent_Account {
 			$login = $o['login_url'] ? $o['login_url'] : wp_login_url();
 			$login = add_query_arg( 'redirect_to', rawurlencode( self::current_url() ), $login );
 			return '<div class="law-agent-account" dir="rtl" lang="ar"><p class="la-account-empty">'
-				. esc_html__( 'سجّل دخولك لعرض استشاراتك.', 'law-agent-chat' )
+				. esc_html__( 'سجّل دخولك لعرض طلباتك.', 'law-agent-chat' )
 				. ' <a class="la-cta-button" href="' . esc_url( $login ) . '">' . esc_html__( 'تسجيل الدخول', 'law-agent-chat' ) . '</a></p></div>';
 		}
 

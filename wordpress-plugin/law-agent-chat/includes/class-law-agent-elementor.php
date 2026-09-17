@@ -21,6 +21,8 @@ class Law_Agent_Elementor {
 			return;
 		}
 		require_once LAW_AGENT_CHAT_DIR . 'includes/class-law-agent-elementor-widget.php';
+		require_once LAW_AGENT_CHAT_DIR . 'includes/class-law-agent-elementor-services.php';
 		$widgets_manager->register( new Law_Agent_Elementor_Widget() );
+		$widgets_manager->register( new Law_Agent_Elementor_Services() );
 	}
 }

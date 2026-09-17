@@ -141,11 +141,11 @@ class Law_Agent_Settings {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><?php esc_html_e( 'Paid consultation', 'law-agent-chat' ); ?></th>
+						<th scope="row"><?php esc_html_e( 'Paid services', 'law-agent-chat' ); ?></th>
 						<td>
 							<label>
 								<input type="checkbox" name="<?php echo esc_attr( $option ); ?>[consult_enabled]" value="1" <?php checked( $o['consult_enabled'], 1 ); ?>>
-								<?php esc_html_e( 'Offer a paid consultation when the assistant declines to answer', 'law-agent-chat' ); ?>
+								<?php esc_html_e( 'Sell the firm\'s services: the booking button in the chat, the [law_agent_services] cards, and the assistant\'s suggestions', 'law-agent-chat' ); ?>
 							</label>
 							<p class="description"><?php esc_html_e( 'Shown on answers labelled "refused". Buying requires an account, so anonymous visitors are asked to sign up first -- that signup upgrades their existing user row, so the conversation they already had stays theirs.', 'law-agent-chat' ); ?></p>
 						</td>
@@ -164,7 +164,7 @@ class Law_Agent_Settings {
 						<th scope="row"><?php esc_html_e( 'Price', 'law-agent-chat' ); ?></th>
 						<td>
 							<p class="description">
-								<?php esc_html_e( 'Set on the backend, not here: CONSULTATION_PRICE_CENTS and CONSULTATION_CURRENCY. The widget asks it for the price and displays whatever it is told, so the figure on the button is always the figure charged.', 'law-agent-chat' ); ?>
+								<?php esc_html_e( 'Services and their prices are managed in the admin dashboard (Services page), not here. The widget asks the backend and displays whatever it is told, so the figure on a button is always the figure charged.', 'law-agent-chat' ); ?>
 							</p>
 						</td>
 					</tr>
@@ -196,7 +196,7 @@ class Law_Agent_Settings {
 						<th scope="row"><label for="la-chat"><?php esc_html_e( 'Chat page', 'law-agent-chat' ); ?></label></th>
 						<td>
 							<input id="la-chat" class="regular-text code" type="url" name="<?php echo esc_attr( $option ); ?>[chat_url]" value="<?php echo esc_attr( $o['chat_url'] ); ?>" placeholder="<?php echo esc_attr( home_url( '/' ) ); ?>">
-							<p class="description"><?php esc_html_e( 'Where the consultations page sends a client who has not booked yet ("حجز استشارة"): the page with the chat widget or its popup. Empty means the home page. The consultations page itself is the "استشاراتي" tab in WooCommerce My Account, or the [law_agent_consultations] shortcode on any page; each consultation opens its own conversation right there.', 'law-agent-chat' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Where the consultations page sends a client who has not booked yet ("حجز استشارة"): the page with the chat widget or its popup. Empty means the home page. The consultations page itself is the "طلباتي" tab in WooCommerce My Account, or the [law_agent_consultations] shortcode on any page; each consultation opens its own conversation right there.', 'law-agent-chat' ); ?></p>
 						</td>
 					</tr>
 					<tr>

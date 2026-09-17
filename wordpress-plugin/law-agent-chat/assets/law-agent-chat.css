@@ -15,7 +15,8 @@
  */
 
 .law-agent-chat,
-.law-agent-account {
+.law-agent-account,
+.law-agent-services {
 	/* brand */
 	--la-teal:        #134e4a;
 	--la-teal-deep:   #0d3b38;
@@ -996,3 +997,160 @@
 	.law-agent-account .la-cfacts dt { margin-top: 8px; }
 	.law-agent-account .la-cmsg { max-width: 100%; }
 }
+
+/* ── new order states ───────────────────────────────────────────────── */
+
+.law-agent-account .la-cstatus.is-in_progress { background: var(--la-sage-soft); color: var(--la-teal); }
+.law-agent-account .la-cstatus.is-completed   { background: var(--la-teal); color: var(--la-teal-ink); }
+.law-agent-account .la-ccard.is-completed     { border-inline-start-color: var(--la-teal); }
+
+.law-agent-account .la-ccard-service {
+	margin: -2px 0 8px;
+	font-weight: 700;
+	color: var(--la-teal);
+}
+
+/* ── the case description form (services that ask for one) ────────── */
+
+.law-agent-chat .la-notes,
+.law-agent-account .la-notes,
+.law-agent-services .la-notes {
+	margin-top: 12px;
+	padding: 14px;
+	border: 1px solid var(--la-sage-rule);
+	border-radius: var(--la-radius-sm);
+	background: var(--la-panel);
+	text-align: right;
+}
+
+.law-agent-chat .la-notes-input,
+.law-agent-account .la-notes-input,
+.law-agent-services .la-notes-input {
+	display: block;
+	width: 100%;
+	margin: 10px 0;
+	padding: 10px 12px;
+	border: 1px solid var(--la-rule);
+	border-radius: var(--la-radius-sm);
+	background: var(--la-bg);
+	color: var(--la-ink);
+	font: inherit;
+	line-height: 1.6;
+	resize: vertical;
+}
+
+.law-agent-chat .la-notes-input:focus,
+.law-agent-account .la-notes-input:focus,
+.law-agent-services .la-notes-input:focus { outline: 2px solid var(--la-sage); outline-offset: 1px; }
+
+/* ── the assistant's suggestion ─────────────────────────────────────── */
+
+.law-agent-chat .la-suggest {
+	border-color: var(--la-sage);
+	background: var(--la-sage-soft);
+}
+
+.law-agent-chat .la-suggest .la-cta-title::before {
+	content: "✦";
+	margin-inline-end: 6px;
+	color: var(--la-sage);
+}
+
+.law-agent-chat .la-suggest-desc {
+	margin: 4px 0 10px;
+	color: var(--la-muted);
+	font-size: 13.5px;
+}
+
+/* ── the services page ──────────────────────────────────────────────── */
+
+.law-agent-services {
+	color: var(--la-ink);
+	font-family: "IBM Plex Sans Arabic", "Noto Naskh Arabic", system-ui, "Segoe UI", Tahoma, sans-serif;
+	font-size: 15px;
+	line-height: 1.75;
+	text-align: right;
+}
+
+.law-agent-services *,
+.law-agent-services *::before,
+.law-agent-services *::after { box-sizing: border-box; }
+
+.law-agent-services .la-account-loading,
+.law-agent-services .la-cmuted { color: var(--la-faint); }
+
+.law-agent-services .la-error {
+	padding: 12px 14px;
+	border-radius: var(--la-radius-sm);
+	background: var(--la-danger-soft);
+	color: var(--la-danger);
+}
+
+.law-agent-services .la-svc-grid {
+	display: grid;
+	grid-template-columns: repeat(var(--la-columns, 3), minmax(0, 1fr));
+	gap: 18px;
+}
+
+@media (max-width: 900px) { .law-agent-services .la-svc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .law-agent-services .la-svc-grid { grid-template-columns: 1fr; } }
+
+.law-agent-services .la-svc {
+	display: flex;
+	flex-direction: column;
+	padding: 22px 20px;
+	border: 1px solid var(--la-rule);
+	border-top: 4px solid var(--la-sage);
+	border-radius: var(--la-radius);
+	background: var(--la-panel);
+	box-shadow: 0 1px 2px rgba(16, 49, 47, .05), 0 8px 24px -12px rgba(16, 49, 47, .18);
+}
+
+.law-agent-services .la-svc-name {
+	margin: 0 0 8px;
+	font-size: 19px;
+	font-weight: 700;
+	color: var(--la-teal);
+}
+
+.law-agent-services .la-svc-desc {
+	margin: 0 0 14px;
+	color: var(--la-muted);
+	flex: 1;
+}
+
+.law-agent-services .la-svc-price {
+	margin-bottom: 14px;
+	font-size: 22px;
+	font-weight: 700;
+	color: var(--la-teal);
+}
+
+.law-agent-services .la-cta-button {
+	display: inline-block;
+	padding: 11px 20px;
+	border: 0;
+	border-radius: var(--la-radius-sm);
+	background: var(--la-teal);
+	color: var(--la-teal-ink);
+	font: inherit;
+	font-weight: 600;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.law-agent-services .la-cta-button:hover { background: var(--la-teal-deep); color: var(--la-teal-ink); }
+
+.law-agent-services .la-login {
+	margin-top: 12px;
+	padding: 12px;
+	border-radius: var(--la-radius-sm);
+	background: var(--la-bg);
+}
+
+.law-agent-services .la-signup-title { font-weight: 700; }
+.law-agent-services .la-signup-body { color: var(--la-muted); font-size: 13.5px; margin-bottom: 8px; }
+.law-agent-services .la-login-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.law-agent-services .la-login-alt { color: var(--la-teal); font-weight: 600; background: none; border: 0; font: inherit; cursor: pointer; }
+.law-agent-services .la-signup-status { margin-top: 8px; font-size: 13.5px; color: var(--la-muted); }
+.law-agent-services .la-signup-status.is-error { color: var(--la-danger); }

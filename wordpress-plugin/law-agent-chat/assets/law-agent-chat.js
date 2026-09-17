@@ -103,7 +103,27 @@
 		cEscalated: 'تم إرسالها للمحامي',
 		cEscalating: 'قيد الإرسال للمحامي',
 		cNotEscalated: 'لم تُرسل بعد',
-		cBook: 'حجز استشارة'
+		cBook: 'حجز استشارة',
+		cService: 'الخدمة',
+		cNotes: 'وصف الحالة',
+		cStatusInProgress: 'قيد العمل',
+		cStatusCompleted: 'مكتملة',
+		cReceived: 'تم استلام الطلب',
+		svcOrder: 'اطلب الخدمة',
+		svcOrderPriced: 'اطلب الخدمة — %s',
+		svcLoginToOrder: 'سجّل دخولك لطلب الخدمة',
+		svcLoginToBook: 'سجّل دخولك لحجز استشارة',
+		svcNotesTitle: 'صف حالتك باختصار',
+		svcNotesHint: 'ما الذي تريد من المحامي مراجعته أو فعله؟',
+		svcNotesRequired: 'اكتب وصفًا مختصرًا لحالتك للمتابعة.',
+		svcContinue: 'متابعة إلى الدفع',
+		svcCancel: 'إلغاء',
+		svcEmpty: 'لا توجد خدمات متاحة حاليًا.',
+		svcLoadError: 'تعذّر تحميل الخدمات. حاول لاحقًا.',
+		svcOpenOrder: 'لديك طلب مفتوح لهذه الخدمة بالفعل.',
+		svcInactive: 'هذه الخدمة غير متاحة حاليًا.',
+		sugTitle: 'يبدو أن حالتك تحتاج: %s',
+		sugAnonBody: 'سجّل دخولك لطلب هذه الخدمة من محامٍ.'
 	};
 
 	var T = (function () {
@@ -167,6 +187,9 @@
 		if (code === 'session_escalated') return T.escalated;
 		if (code === 'not_ready' || code === 'upstream_unavailable') return T.errNotReady;
 		if (code === 'unauthenticated') return T.errAuth;
+		if (code === 'consultation_exists') return T.svcOpenOrder;
+		if (code === 'service_inactive' || code === 'service_not_found') return T.svcInactive;
+		if (code === 'notes_required') return T.svcNotesRequired;
 		if (code === 'email_taken' || err.status === 409) return T.errOpenConsult;
 		if (code === 'network') return T.errNetwork;
 		if (code === 'no_speech' || code === 'bad_audio') return T.noSpeech;
@@ -682,17 +705,18 @@
 		// widget never offers something that cannot be bought.
 		var consult = CFG.consult || {};
 		if (this.bookBar && this.bookBtn && consult.enabled && consult.checkout) {
-			this.bookBtn.textContent = T.ctaButtonPlain;
 			this.bookBar.hidden = false;
-			consultationPrice().then(
-				function (price) {
-					this.bookBtn.textContent = T.ctaButton.replace(
-						'%s',
-						money(price.amount_cents, price.currency)
-					);
-				}.bind(this),
-				function () { /* label without the figure is still correct */ }
-			);
+			if (Auth.isAnonymous()) {
+				this.bookBtn.textContent = T.svcLoginToBook;
+			} else {
+				this.bookBtn.textContent = T.ctaButtonPlain;
+				Services.consultation().then(
+					function (svc) {
+						priceLabel(this.bookBtn, svc, T.ctaButtonPlain, T.ctaButton);
+					}.bind(this),
+					function () { /* label without the figure is still correct */ }
+				);
+			}
 		}
 	};
 
@@ -864,7 +888,11 @@
 					var node = self.renderMessage(m.role, m.content, m.source_label, m.input_mode);
 					if (m.sources && m.sources.length) self.addSources(node, m.sources);
 					if (m.role === 'assistant' && m.content) self.addListen(node, m.message_id);
-					if (m.role === 'assistant' && m.source_label === 'refused') {
+					if (m.role === 'assistant' && m.suggested_service) {
+						self.addSuggestion(node, {
+							service: m.suggested_service, reason: m.suggestion_reason
+						}, m.message_id);
+					} else if (m.role === 'assistant' && m.source_label === 'refused') {
 						self.addConsultationCta(node);
 					}
 				});
@@ -1076,11 +1104,20 @@
 			return;
 		}
 
+		if (event === 'suggestion') {
+			// Arrives just before `done`; rendered there, under the label.
+			state.suggestion = data;
+			return;
+		}
+
 		if (event === 'done') {
 			target.innerHTML = markdown(state.raw);
 			this.addSources(bubble, state.sources);
 			this.addLabel(bubble, data.source_label);
-			if (data.source_label === 'refused') {
+			if (state.suggestion) {
+				// A specific service beats the generic consultation offer.
+				this.addSuggestion(bubble, state.suggestion, state.messageId);
+			} else if (data.source_label === 'refused') {
 				this.addConsultationCta(bubble);
 			}
 			if (state.raw) this.addListen(bubble, state.messageId);
@@ -1406,21 +1443,187 @@
 	 * widget touches money.
 	 */
 
-	/**
-	 * What a consultation costs, as the backend says.
-	 *
-	 * Asked rather than configured: the amount is set by
-	 * CONSULTATION_PRICE_CENTS on the product backend and charged from there,
-	 * so quoting a number held anywhere else risks putting one figure on the
-	 * button and a different one on the invoice. Cached for the page view.
+	/* ── the catalogue ────────────────────────────────────────────────────
+	 * What the firm sells, as the backend says. Asked rather than configured:
+	 * a price is set in the dashboard and charged from the same row, so a
+	 * number held anywhere else could only disagree with the invoice.
+	 * Public and unauthenticated; cached for the page view.
 	 */
-	var priceRequest = null;
+	var CONSULTATION_SLUG = 'consultation';
+
+	var Services = {
+		req: null,
+		list: function () {
+			if (!this.req) {
+				this.req = request(BE, '/services', { method: 'GET' }).then(
+					function (rows) { return rows || []; },
+					function (err) { Services.req = null; throw err; }
+				);
+			}
+			return this.req;
+		},
+		get: function (slug) {
+			return this.list().then(function (rows) {
+				for (var i = 0; i < rows.length; i++) {
+					if (rows[i].slug === slug) return rows[i];
+				}
+				return null;
+			});
+		},
+		consultation: function () {
+			return this.get(CONSULTATION_SLUG);
+		}
+	};
 
 	function consultationPrice() {
-		if (!priceRequest) {
-			priceRequest = authed(BE, '/consultations/price', { method: 'GET' });
+		return Services.consultation().then(function (svc) {
+			if (!svc) throw new ApiError('service_not_found', 'no consultation service', 404);
+			return { amount_cents: svc.price_cents, currency: svc.currency };
+		});
+	}
+
+	/* ── ordering ─────────────────────────────────────────────────────────
+	 * One flow for every place a service can be bought: the chat's booking
+	 * button, the card under a refused answer, the assistant's suggestion,
+	 * the services page. Sign in first; describe the case if the service
+	 * asks for it; then the backend prices it and Paymob takes over.
+	 */
+
+	/**
+	 * The sign-in / register panel. WordPress owns accounts, so this sends
+	 * people to its login with a redirect back to this page. A conversation
+	 * is not lost by leaving: it sits on the anonymous user row, which the
+	 * backend links to the WordPress user on return.
+	 */
+	function signupPanel(box) {
+		if (box.querySelector('.la-login')) return;
+
+		var panel = el('div', 'la-login');
+		panel.appendChild(el('div', 'la-signup-title', T.loginTitle));
+		panel.appendChild(el('div', 'la-signup-body', T.loginBody));
+
+		function withReturn(url) {
+			return url + (url.indexOf('?') === -1 ? '?' : '&') +
+				'redirect_to=' + encodeURIComponent(window.location.href);
 		}
-		return priceRequest;
+
+		var actions = el('div', 'la-login-actions');
+		var link = el('a', 'la-cta-button', T.loginButton);
+		link.href = withReturn(CFG.loginUrl || '#');
+		link.rel = 'nofollow';
+		actions.appendChild(link);
+		if (CFG.registerUrl) {
+			var reg = el('a', 'la-login-alt', T.registerButton);
+			reg.href = withReturn(CFG.registerUrl);
+			reg.rel = 'nofollow';
+			actions.appendChild(reg);
+		}
+		panel.appendChild(actions);
+		box.appendChild(panel);
+	}
+
+	var Orders = {
+		/** opts: { sessionId, notes } */
+		start: function (box, service, opts) {
+			opts = opts || {};
+			// Anonymous visitors can ask, but not buy: the backend refuses
+			// them, and they should never see a payment step. An account
+			// first -- and because signup upgrades the same user row, the
+			// conversation stays theirs.
+			if (Auth.isAnonymous()) {
+				signupPanel(box);
+				return Promise.resolve(null);
+			}
+			if (service && service.needs_notes && !opts.notes) {
+				Orders.askNotes(box, service, opts);
+				return Promise.resolve(null);
+			}
+			return Orders.checkout(box, service, opts);
+		},
+
+		askNotes: function (box, service, opts) {
+			if (box.querySelector('.la-notes')) return;
+			var form = el('form', 'la-notes');
+			form.setAttribute('onsubmit', 'return false');
+			form.appendChild(el('div', 'la-signup-title', T.svcNotesTitle));
+			form.appendChild(el('div', 'la-signup-body', T.svcNotesHint));
+			var ta = el('textarea', 'la-notes-input');
+			ta.rows = 4;
+			ta.maxLength = 4000;
+			form.appendChild(ta);
+			var err = el('div', 'la-signup-status');
+			form.appendChild(err);
+			var actions = el('div', 'la-login-actions');
+			var go = el('button', 'la-cta-button', T.svcContinue);
+			go.type = 'submit';
+			var cancel = el('button', 'la-login-alt', T.svcCancel);
+			cancel.type = 'button';
+			actions.appendChild(go);
+			actions.appendChild(cancel);
+			form.appendChild(actions);
+			form.addEventListener('submit', function (e) {
+				e.preventDefault();
+				var notes = ta.value.trim();
+				if (!notes) {
+					err.className = 'la-signup-status is-error';
+					err.textContent = T.svcNotesRequired;
+					return;
+				}
+				go.disabled = true;
+				var next = {};
+				for (var k in opts) if (Object.prototype.hasOwnProperty.call(opts, k)) next[k] = opts[k];
+				next.notes = notes;
+				next.status = err;
+				err.className = 'la-signup-status';
+				Orders.checkout(box, service, next).then(function () { go.disabled = false; });
+			});
+			cancel.addEventListener('click', function () { form.remove(); });
+			box.appendChild(form);
+			ta.focus();
+		},
+
+		checkout: function (box, service, opts) {
+			opts = opts || {};
+			var consult = CFG.consult || {};
+			var status = opts.status || el('div', 'la-signup-status');
+			if (!opts.status) box.appendChild(status);
+			status.className = 'la-signup-status';
+			status.textContent = T.signupWorking || '';
+
+			// No amount and no currency: the backend prices this itself from
+			// the service row. Sending them is a 400, which is the point -- a
+			// price the buyer can edit is not a price.
+			return authed(BE, '/consultations', {
+				method: 'POST',
+				body: JSON.stringify({
+					service_id: service ? service.slug : undefined,
+					client_notes: opts.notes || undefined,
+					ai_session_id: opts.sessionId || undefined
+				})
+			}).then(
+				function (order) {
+					if (!order || !order.payment_key) {
+						throw new ApiError('error', 'no payment key returned', 0);
+					}
+					// The gateway takes it from here. Handover happens
+					// server-side when the webhook confirms the money.
+					window.location.href = consult.checkout + '?payment_token=' +
+						encodeURIComponent(order.payment_key);
+				},
+				function (err) {
+					status.className = 'la-signup-status is-error';
+					status.textContent = humanError(err);
+				}
+			);
+		}
+	};
+
+	/** The order button's label: priced when the catalogue answers. */
+	function priceLabel(btn, service, plain, priced) {
+		btn.textContent = plain;
+		if (service && service.price_cents) {
+			btn.textContent = priced.replace('%s', money(service.price_cents, service.currency));
+		}
 	}
 
 	/** The offer panel. Shared by the `refused` CTA and the persistent bar. */
@@ -1436,31 +1639,74 @@
 
 		var btn = el('button', 'la-cta-button');
 		btn.type = 'button';
+
+		if (Auth.isAnonymous()) {
+			// No figure and no payment step until there is an account. The
+			// button is the invitation to make one.
+			btn.textContent = T.svcLoginToBook;
+			btn.addEventListener('click', function () { signupPanel(box); });
+			box.appendChild(btn);
+			return box;
+		}
+
 		// Labelled without a figure until the backend supplies one, rather
 		// than guessing and correcting.
+		var service = null;
 		btn.textContent = T.ctaButtonPlain;
-		consultationPrice().then(
-			function (price) {
-				btn.textContent = T.ctaButton.replace(
-					'%s',
-					money(price.amount_cents, price.currency)
-				);
+		Services.consultation().then(
+			function (svc) {
+				service = svc;
+				priceLabel(btn, svc, T.ctaButtonPlain, T.ctaButton);
 			},
 			function () { /* the button still works; only the figure is missing */ }
 		);
 		btn.addEventListener('click', function () {
-			// Anonymous visitors can ask, but not buy: POST /consultations is
-			// registered-only. Collect an account first -- and because signup
-			// upgrades this same user in place, the conversation above stays
-			// theirs afterwards.
-			if (Auth.isAnonymous()) {
-				self.showSignup(box);
-			} else {
-				self.checkout(box);
-			}
+			Orders.start(box, service, { sessionId: self.sessionId });
 		});
 		box.appendChild(btn);
 		return box;
+	};
+
+	/**
+	 * The card under an answer when the assistant thinks one of the firm's
+	 * services fits. The service is read from the catalogue, not from the
+	 * event, so a suggestion stored weeks ago shows today's price -- and no
+	 * card at all if the service has since been retired.
+	 */
+	Widget.prototype.addSuggestion = function (bubble, data, messageId) {
+		var self = this;
+		var consult = CFG.consult || {};
+		if (!consult.enabled || !consult.checkout || !data || !data.service) return;
+		if (bubble.querySelector('.la-suggest')) return;
+
+		Services.get(data.service).then(function (svc) {
+			if (!svc) return;
+			var box = el('div', 'la-cta la-suggest');
+			box.appendChild(el('div', 'la-cta-title', T.sugTitle.replace('%s', svc.name)));
+			if (data.reason) box.appendChild(el('div', 'la-cta-body', data.reason));
+			if (svc.description) box.appendChild(el('div', 'la-suggest-desc', svc.description));
+
+			var btn = el('button', 'la-cta-button');
+			btn.type = 'button';
+			if (Auth.isAnonymous()) {
+				box.appendChild(el('div', 'la-cta-body', T.sugAnonBody));
+				btn.textContent = T.svcLoginToOrder;
+				btn.addEventListener('click', function () { signupPanel(box); });
+			} else {
+				priceLabel(btn, svc, T.svcOrder, T.svcOrderPriced);
+				btn.addEventListener('click', function () {
+					// A measurement only; never waited on.
+					if (messageId) {
+						authed(AI, '/v1/messages/' + encodeURIComponent(messageId) + '/suggestion-click',
+							{ method: 'POST' }).catch(function () {});
+					}
+					Orders.start(box, svc, { sessionId: self.sessionId });
+				});
+			}
+			box.appendChild(btn);
+			bubble.querySelector('.la-bubble').appendChild(box);
+			self.scroll();
+		}, function () { /* no catalogue, no card */ });
 	};
 
 	Widget.prototype.addConsultationCta = function (bubble) {
@@ -1500,74 +1746,12 @@
 	 * WordPress user. Same id, same conversations.
 	 */
 	Widget.prototype.showSignup = function (box) {
-		if (box.querySelector('.la-login')) return;
-
-		var panel = el('div', 'la-login');
-		panel.appendChild(el('div', 'la-signup-title', T.loginTitle));
-		panel.appendChild(el('div', 'la-signup-body', T.loginBody));
-
-		// Back to this page afterwards, so the conversation they were having
-		// is still on screen when they return -- and gets linked to the
-		// account they just used.
-		function withReturn(url) {
-			return url + (url.indexOf('?') === -1 ? '?' : '&') +
-				'redirect_to=' + encodeURIComponent(window.location.href);
-		}
-
-		var actions = el('div', 'la-login-actions');
-
-		var link = el('a', 'la-cta-button', T.loginButton);
-		link.href = withReturn(CFG.loginUrl || '#');
-		link.rel = 'nofollow';
-		actions.appendChild(link);
-
-		// Sites that split sign-in from sign-up get both. A first-time visitor
-		// dropped on a login form has to go hunting for the register link,
-		// which is the wrong thing to make someone do mid-purchase.
-		if (CFG.registerUrl) {
-			var reg = el('a', 'la-login-alt', T.registerButton);
-			reg.href = withReturn(CFG.registerUrl);
-			reg.rel = 'nofollow';
-			actions.appendChild(reg);
-		}
-
-		panel.appendChild(actions);
-
-		box.appendChild(panel);
+		signupPanel(box);
 		this.scroll();
 	};
 
 	Widget.prototype.checkout = function (box, statusNode) {
-		var self = this;
-		var consult = CFG.consult || {};
-		var status = statusNode || el('div', 'la-signup-status');
-		if (!statusNode) box.appendChild(status);
-		status.textContent = T.signupWorking || '';
-
-		// No amount and no currency: the backend prices this itself. Sending
-		// them is now a 400, which is the point -- a price the buyer can edit
-		// is not a price.
-		return authed(BE, '/consultations', {
-			method: 'POST',
-			body: JSON.stringify({
-				ai_session_id: self.sessionId || undefined
-			})
-		}).then(
-			function (consultation) {
-				if (!consultation || !consultation.payment_key) {
-					throw new ApiError('error', 'no payment key returned', 0);
-				}
-				// The gateway takes it from here. Escalation happens
-				// server-side when the webhook confirms the money -- this
-				// widget never calls escalate itself.
-				window.location.href = consult.checkout + '?payment_token=' +
-					encodeURIComponent(consultation.payment_key);
-			},
-			function (err) {
-				status.className = 'la-signup-status is-error';
-				status.textContent = humanError(err);
-			}
-		);
+		return Orders.checkout(box, null, { sessionId: this.sessionId, status: statusNode });
 	};
 
 	/* ── util ─────────────────────────────────────────────────────────── */
@@ -1604,6 +1788,8 @@
 	Consultations.STATUS = {
 		pending: 'cStatusPending',
 		paid: 'cStatusPaid',
+		in_progress: 'cStatusInProgress',
+		completed: 'cStatusCompleted',
 		cancelled: 'cStatusCancelled',
 		refunded: 'cStatusRefunded'
 	};
@@ -1665,9 +1851,11 @@
 		var card = el('article', 'la-ccard is-' + (c.status || 'pending'));
 
 		var head = el('div', 'la-ccard-head');
-		head.appendChild(el('span', 'la-ccard-date', fmtDate(c.created_at)));
+		var when = el('span', 'la-ccard-date', fmtDate(c.created_at));
+		head.appendChild(when);
 		head.appendChild(this.statusBadge(c));
 		card.appendChild(head);
+		if (c.service_name) card.appendChild(el('div', 'la-ccard-service', c.service_name));
 
 		var body = el('div', 'la-ccard-body');
 		body.appendChild(el('span', 'la-ccard-amount', money(c.amount_cents, c.currency)));
@@ -1690,7 +1878,7 @@
 		if (CFG.accountUrl) this.root.appendChild(this.backLink());
 
 		var head = el('div', 'la-cdetail-head');
-		head.appendChild(el('h3', 'la-cdetail-title', T.cTitle + ' — ' + shortId(c.consultation_id)));
+		head.appendChild(el('h3', 'la-cdetail-title', (c.service_name || T.cTitle) + ' — ' + shortId(c.consultation_id)));
 		head.appendChild(this.statusBadge(c));
 		this.root.appendChild(head);
 
@@ -1701,12 +1889,20 @@
 			dl.appendChild(el('dd', '', value));
 		}
 		fact(T.cNumber, c.consultation_id);
+		fact(T.cService, c.service_name);
 		fact(T.cDate, fmtDate(c.created_at));
 		fact(T.cAmount, money(c.amount_cents, c.currency));
 		fact(T.cPaidAt, c.paid_at ? fmtDate(c.paid_at) : null);
 		fact(T.cLawyer, this.lawyerText(c));
 		fact(T.cLanguage, langName(c.chat_language));
 		this.root.appendChild(dl);
+
+		if (c.client_notes) {
+			var notes = el('section', 'la-csection');
+			notes.appendChild(el('h4', '', T.cNotes));
+			notes.appendChild(el('p', 'la-csummary', c.client_notes));
+			this.root.appendChild(notes);
+		}
 
 		if (c.escalation_summary) {
 			var sum = el('section', 'la-csection');
@@ -1776,7 +1972,9 @@
 
 	/** Handover state matters more to a client than the payment row does. */
 	Consultations.prototype.lawyerText = function (c) {
-		if (c.escalated) return T.cEscalated;
+		if (c.status === 'in_progress') return T.cStatusInProgress;
+		if (c.status === 'completed') return T.cStatusCompleted;
+		if (c.escalated) return c.ai_session_id ? T.cEscalated : T.cReceived;
 		if (c.status === 'paid') return T.cEscalating;
 		return T.cNotEscalated;
 	};
@@ -1804,6 +2002,62 @@
 		var a = el('a', 'la-clink la-clink-chat', T.cOpenChat);
 		a.href = this.detailUrl(consultationId) + '#la-chat';
 		return a;
+	};
+
+	/* ── the services page ────────────────────────────────────────────────
+	 * [law_agent_services]: one card per active service, from the catalogue.
+	 * Prices are shown to everyone -- it is a price list -- but the button
+	 * only orders for a signed-in client; for anyone else it signs them in.
+	 */
+	function ServicesPage(root) {
+		this.root = root;
+		this.only = (root.getAttribute('data-only') || '').split(',').filter(Boolean);
+		this.root.style.setProperty('--la-columns', root.getAttribute('data-columns') || '3');
+		this.load();
+	}
+
+	ServicesPage.prototype.load = function () {
+		var self = this;
+		Services.list().then(
+			function (rows) {
+				self.root.innerHTML = '';
+				if (self.only.length) {
+					rows = rows.filter(function (r) { return self.only.indexOf(r.slug) !== -1; });
+				}
+				if (!rows.length) {
+					self.root.appendChild(el('p', 'la-cmuted', T.svcEmpty));
+					return;
+				}
+				var grid = el('div', 'la-svc-grid');
+				rows.forEach(function (svc) { grid.appendChild(self.card(svc)); });
+				self.root.appendChild(grid);
+			},
+			function () {
+				self.root.innerHTML = '';
+				self.root.appendChild(el('div', 'la-error', T.svcLoadError));
+			}
+		);
+	};
+
+	ServicesPage.prototype.card = function (svc) {
+		var card = el('article', 'la-svc');
+		card.appendChild(el('h3', 'la-svc-name', svc.name));
+		if (svc.description) card.appendChild(el('p', 'la-svc-desc', svc.description));
+		card.appendChild(el('div', 'la-svc-price', money(svc.price_cents, svc.currency)));
+
+		var btn = el('button', 'la-cta-button');
+		btn.type = 'button';
+		var box = el('div', 'la-svc-flow');
+		if (Auth.isAnonymous()) {
+			btn.textContent = T.svcLoginToOrder;
+			btn.addEventListener('click', function () { signupPanel(box); });
+		} else {
+			btn.textContent = T.svcOrder;
+			btn.addEventListener('click', function () { Orders.start(box, svc, {}); });
+		}
+		card.appendChild(btn);
+		card.appendChild(box);
+		return card;
 	};
 
 	function fmtDate(iso) {
@@ -1842,6 +2096,19 @@
 			if (!pages[j].dataset.laMounted) {
 				pages[j].dataset.laMounted = '1';
 				new Consultations(pages[j]);
+			}
+		}
+		var lists = document.querySelectorAll('[data-law-agent-services]');
+		for (var k = 0; k < lists.length; k++) {
+			if (!lists[k].dataset.laMounted) {
+				lists[k].dataset.laMounted = '1';
+				// The services page needs to know whether the visitor is
+				// signed in before it draws a button; the widget's auth
+				// bootstrap does that, and it is idempotent.
+				(function (node) {
+					Auth.ensure().then(function () { new ServicesPage(node); },
+						function () { new ServicesPage(node); });
+				})(lists[k]);
 			}
 		}
 	}
