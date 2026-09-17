@@ -88,6 +88,10 @@ class Law_Agent_Assets {
 					'restNonce'       => wp_create_nonce( 'wp_rest' ),
 					'loginUrl'        => $o['login_url'] ? $o['login_url'] : wp_login_url(),
 					'registerUrl'     => $o['register_url'],
+					// For the consultations page: where a conversation opens, and
+					// where its list lives (empty without WooCommerce).
+					'chatUrl'         => $o['chat_url'] ? $o['chat_url'] : home_url( '/' ),
+					'accountUrl'      => Law_Agent_Account::list_url(),
 					'voiceEnabled'    => (bool) $o['voice_enabled'],
 					// Must match VOICE_MAX_SECONDS on the AI service, which
 					// refuses longer recordings. The widget stops here so a
@@ -183,6 +187,34 @@ class Law_Agent_Assets {
 			'noSpeech'         => __( 'لم نسمع كلامًا واضحًا. حاول مرة أخرى.', 'law-agent-chat' ),
 			'speechDown'       => __( 'خدمة الصوت غير متاحة حاليًا. اكتب سؤالك بدلًا من ذلك.', 'law-agent-chat' ),
 			'listen'           => __( 'استمع', 'law-agent-chat' ),
+
+			/* the consultations page */
+			'cTitle'           => __( 'استشاراتي', 'law-agent-chat' ),
+			'cEmpty'           => __( 'لم تحجز أي استشارة بعد.', 'law-agent-chat' ),
+			'cLoadError'       => __( 'تعذّر تحميل الاستشارات. حاول لاحقًا.', 'law-agent-chat' ),
+			'cNotFound'        => __( 'لم نعثر على هذه الاستشارة.', 'law-agent-chat' ),
+			'cBack'            => __( 'العودة إلى استشاراتي', 'law-agent-chat' ),
+			'cNumber'          => __( 'رقم الاستشارة', 'law-agent-chat' ),
+			'cDate'            => __( 'التاريخ', 'law-agent-chat' ),
+			'cStatus'          => __( 'الحالة', 'law-agent-chat' ),
+			'cAmount'          => __( 'المبلغ', 'law-agent-chat' ),
+			'cPaidAt'          => __( 'تاريخ الدفع', 'law-agent-chat' ),
+			'cLawyer'          => __( 'المحامي', 'law-agent-chat' ),
+			'cLanguage'        => __( 'لغة المحادثة', 'law-agent-chat' ),
+			'cSummary'         => __( 'ملخص الحالة المرسل للمحامي', 'law-agent-chat' ),
+			'cTranscript'      => __( 'المحادثة', 'law-agent-chat' ),
+			'cDetails'         => __( 'التفاصيل', 'law-agent-chat' ),
+			'cOpenChat'        => __( 'افتح المحادثة', 'law-agent-chat' ),
+			'cNoSession'       => __( 'لا توجد محادثة مرتبطة بهذه الاستشارة.', 'law-agent-chat' ),
+			'cTranscriptError' => __( 'تعذّر تحميل المحادثة.', 'law-agent-chat' ),
+			'cStatusPending'   => __( 'بانتظار الدفع', 'law-agent-chat' ),
+			'cStatusPaid'      => __( 'مدفوعة', 'law-agent-chat' ),
+			'cStatusCancelled' => __( 'ملغاة', 'law-agent-chat' ),
+			'cStatusRefunded'  => __( 'مستردة', 'law-agent-chat' ),
+			'cEscalated'       => __( 'تم إرسالها للمحامي', 'law-agent-chat' ),
+			'cEscalating'      => __( 'قيد الإرسال للمحامي', 'law-agent-chat' ),
+			'cNotEscalated'    => __( 'لم تُرسل بعد', 'law-agent-chat' ),
+			'cBook'            => __( 'حجز استشارة', 'law-agent-chat' ),
 			'stopListening'    => __( 'إيقاف', 'law-agent-chat' ),
 			'loadingAudio'     => __( 'جارٍ التحميل…', 'law-agent-chat' ),
 		);

@@ -75,7 +75,35 @@
 		speechDown: 'خدمة الصوت غير متاحة حاليًا. اكتب سؤالك بدلًا من ذلك.',
 		listen: 'استمع',
 		stopListening: 'إيقاف',
-		loadingAudio: 'جارٍ التحميل…'
+		loadingAudio: 'جارٍ التحميل…',
+		you: 'أنت',
+		assistant: 'المستشار',
+		cTitle: 'استشاراتي',
+		cEmpty: 'لم تحجز أي استشارة بعد.',
+		cLoadError: 'تعذّر تحميل الاستشارات. حاول لاحقًا.',
+		cNotFound: 'لم نعثر على هذه الاستشارة.',
+		cBack: 'العودة إلى استشاراتي',
+		cNumber: 'رقم الاستشارة',
+		cDate: 'التاريخ',
+		cStatus: 'الحالة',
+		cAmount: 'المبلغ',
+		cPaidAt: 'تاريخ الدفع',
+		cLawyer: 'المحامي',
+		cLanguage: 'لغة المحادثة',
+		cSummary: 'ملخص الحالة المرسل للمحامي',
+		cTranscript: 'المحادثة',
+		cDetails: 'التفاصيل',
+		cOpenChat: 'افتح المحادثة',
+		cNoSession: 'لا توجد محادثة مرتبطة بهذه الاستشارة.',
+		cTranscriptError: 'تعذّر تحميل المحادثة.',
+		cStatusPending: 'بانتظار الدفع',
+		cStatusPaid: 'مدفوعة',
+		cStatusCancelled: 'ملغاة',
+		cStatusRefunded: 'مستردة',
+		cEscalated: 'تم إرسالها للمحامي',
+		cEscalating: 'قيد الإرسال للمحامي',
+		cNotEscalated: 'لم تُرسل بعد',
+		cBook: 'حجز استشارة'
 	};
 
 	var T = (function () {
@@ -1551,12 +1579,248 @@
 		});
 	}
 
+	/* ── the consultations page ───────────────────────────────────────────
+	 * "استشاراتي" in My Account. Reads GET /consultations with the visitor's
+	 * own token, so it can only ever list theirs -- the backend scopes the
+	 * route to the caller, not this page.
+	 *
+	 * Read-only. Paying happens in the chat; this is where a client comes
+	 * back to see what they paid for and whether the lawyer has it.
+	 */
+	function Consultations(root) {
+		this.root = root;
+		this.id = root.getAttribute('data-consultation') || '';
+		this.root.innerHTML = '';
+		this.load();
+	}
+
+	Consultations.STATUS = {
+		pending: 'cStatusPending',
+		paid: 'cStatusPaid',
+		cancelled: 'cStatusCancelled',
+		refunded: 'cStatusRefunded'
+	};
+
+	Consultations.prototype.load = function () {
+		var self = this;
+		this.root.appendChild(el('div', 'la-account-loading', T.loadingAudio));
+
+		var req = this.id
+			? authed(BE, '/consultations/' + encodeURIComponent(this.id), { method: 'GET' })
+			: authed(BE, '/consultations', { method: 'GET' });
+
+		req.then(
+			function (data) {
+				self.root.innerHTML = '';
+				if (self.id) {
+					self.renderDetail(data);
+				} else {
+					self.renderList(data || []);
+				}
+			},
+			function (err) {
+				self.root.innerHTML = '';
+				var msg = err && err.status === 404 ? T.cNotFound : T.cLoadError;
+				self.root.appendChild(el('div', 'la-error', msg));
+				if (self.id && CFG.accountUrl) self.root.appendChild(self.backLink());
+			}
+		);
+	};
+
+	/** Newest first: the one they just paid for is the one they came to see. */
+	Consultations.prototype.renderList = function (rows) {
+		var self = this;
+		rows = rows.slice().sort(function (a, b) {
+			return String(b.created_at).localeCompare(String(a.created_at));
+		});
+
+		if (!rows.length) {
+			var empty = el('div', 'la-account-empty');
+			empty.appendChild(el('p', '', T.cEmpty));
+			var consult = CFG.consult || {};
+			if (consult.enabled && CFG.chatUrl) {
+				var go = el('a', 'la-cta-button', T.cBook);
+				go.href = CFG.chatUrl;
+				empty.appendChild(go);
+			}
+			this.root.appendChild(empty);
+			return;
+		}
+
+		var list = el('div', 'la-clist');
+		rows.forEach(function (c) {
+			list.appendChild(self.card(c));
+		});
+		this.root.appendChild(list);
+	};
+
+	Consultations.prototype.card = function (c) {
+		var card = el('article', 'la-ccard is-' + (c.status || 'pending'));
+
+		var head = el('div', 'la-ccard-head');
+		head.appendChild(el('span', 'la-ccard-date', fmtDate(c.created_at)));
+		head.appendChild(this.statusBadge(c));
+		card.appendChild(head);
+
+		var body = el('div', 'la-ccard-body');
+		body.appendChild(el('span', 'la-ccard-amount', money(c.amount_cents, c.currency)));
+		body.appendChild(el('span', 'la-ccard-lawyer', this.lawyerText(c)));
+		card.appendChild(body);
+
+		var actions = el('div', 'la-ccard-actions');
+		var details = el('a', 'la-clink', T.cDetails);
+		details.href = this.detailUrl(c.consultation_id);
+		actions.appendChild(details);
+		if (c.ai_session_id) {
+			actions.appendChild(this.openChatLink(c.ai_session_id));
+		}
+		card.appendChild(actions);
+
+		return card;
+	};
+
+	Consultations.prototype.renderDetail = function (c) {
+		if (CFG.accountUrl) this.root.appendChild(this.backLink());
+
+		var head = el('div', 'la-cdetail-head');
+		head.appendChild(el('h3', 'la-cdetail-title', T.cTitle + ' — ' + shortId(c.consultation_id)));
+		head.appendChild(this.statusBadge(c));
+		this.root.appendChild(head);
+
+		var dl = el('dl', 'la-cfacts');
+		function fact(label, value) {
+			if (value === null || value === undefined || value === '') return;
+			dl.appendChild(el('dt', '', label));
+			dl.appendChild(el('dd', '', value));
+		}
+		fact(T.cNumber, c.consultation_id);
+		fact(T.cDate, fmtDate(c.created_at));
+		fact(T.cAmount, money(c.amount_cents, c.currency));
+		fact(T.cPaidAt, c.paid_at ? fmtDate(c.paid_at) : null);
+		fact(T.cLawyer, this.lawyerText(c));
+		fact(T.cLanguage, langName(c.chat_language));
+		this.root.appendChild(dl);
+
+		if (c.escalation_summary) {
+			var sum = el('section', 'la-csection');
+			sum.appendChild(el('h4', '', T.cSummary));
+			sum.appendChild(el('p', 'la-csummary', c.escalation_summary));
+			this.root.appendChild(sum);
+		}
+
+		var tx = el('section', 'la-csection');
+		var txHead = el('div', 'la-csection-head');
+		txHead.appendChild(el('h4', '', T.cTranscript));
+		if (c.ai_session_id) txHead.appendChild(this.openChatLink(c.ai_session_id));
+		tx.appendChild(txHead);
+		this.root.appendChild(tx);
+
+		if (!c.ai_session_id) {
+			tx.appendChild(el('p', 'la-cmuted', T.cNoSession));
+			return;
+		}
+
+		var thread = el('div', 'la-cthread');
+		thread.appendChild(el('div', 'la-account-loading', T.loadingAudio));
+		tx.appendChild(thread);
+
+		// The user owns this session, so their own token reads it. Ordered by
+		// seq for the same reason the widget does.
+		authed(AI, '/v1/sessions/' + encodeURIComponent(c.ai_session_id) + '/messages', { method: 'GET' }).then(
+			function (messages) {
+				thread.innerHTML = '';
+				(messages || []).slice().sort(function (a, b) { return a.seq - b.seq; }).forEach(function (m) {
+					var row = el('div', 'la-cmsg ' + m.role + (m.input_mode === 'voice' ? ' is-voice' : ''));
+					row.appendChild(el('span', 'la-cmsg-who', m.role === 'user' ? T.you : T.assistant));
+					var body = el('div', 'la-cmsg-body la-md');
+					body.innerHTML = markdown(m.content || '');
+					row.appendChild(body);
+					thread.appendChild(row);
+				});
+				if (!thread.childNodes.length) thread.appendChild(el('p', 'la-cmuted', T.cNoSession));
+			},
+			function () {
+				thread.innerHTML = '';
+				thread.appendChild(el('p', 'la-error', T.cTranscriptError));
+			}
+		);
+	};
+
+	Consultations.prototype.statusBadge = function (c) {
+		var key = Consultations.STATUS[c.status] || 'cStatusPending';
+		return el('span', 'la-cstatus is-' + (c.status || 'pending'), T[key]);
+	};
+
+	/** Handover state matters more to a client than the payment row does. */
+	Consultations.prototype.lawyerText = function (c) {
+		if (c.escalated) return T.cEscalated;
+		if (c.status === 'paid') return T.cEscalating;
+		return T.cNotEscalated;
+	};
+
+	Consultations.prototype.detailUrl = function (id) {
+		if (CFG.accountUrl) {
+			return CFG.accountUrl.replace(/\/+$/, '') + '/' + encodeURIComponent(id) + '/';
+		}
+		var here = window.location.href.split('#')[0].replace(/[?&]consultation=[^&]*/, '');
+		return here + (here.indexOf('?') === -1 ? '?' : '&') + 'consultation=' + encodeURIComponent(id);
+	};
+
+	Consultations.prototype.backLink = function () {
+		var a = el('a', 'la-cback', T.cBack);
+		a.href = CFG.accountUrl;
+		return a;
+	};
+
+	/**
+	 * The widget opens whatever session is stored, so selecting one here and
+	 * going to the chat page lands them on this exact conversation.
+	 */
+	Consultations.prototype.openChatLink = function (sessionId) {
+		var a = el('a', 'la-clink la-clink-chat', T.cOpenChat);
+		a.href = CFG.chatUrl || '/';
+		a.addEventListener('click', function () {
+			write(SESSION_KEY, { id: sessionId });
+		});
+		return a;
+	};
+
+	function fmtDate(iso) {
+		if (!iso) return '';
+		var d = new Date(iso);
+		if (isNaN(d.getTime())) return String(iso);
+		try {
+			return new Intl.DateTimeFormat('ar', { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+		} catch (e) {
+			return d.toLocaleString();
+		}
+	}
+
+	function shortId(id) {
+		return String(id || '').slice(-6).toUpperCase();
+	}
+
+	function langName(code) {
+		if (!code) return null;
+		var c = String(code).toLowerCase();
+		if (c.indexOf('ar') === 0) return 'العربية';
+		if (c.indexOf('en') === 0) return 'English';
+		return code;
+	}
+
 	function boot() {
 		var nodes = document.querySelectorAll('[data-law-agent-chat]');
 		for (var i = 0; i < nodes.length; i++) {
 			if (!nodes[i].dataset.laMounted) {
 				nodes[i].dataset.laMounted = '1';
 				new Widget(nodes[i]);
+			}
+		}
+		var pages = document.querySelectorAll('[data-law-agent-consultations]');
+		for (var j = 0; j < pages.length; j++) {
+			if (!pages[j].dataset.laMounted) {
+				pages[j].dataset.laMounted = '1';
+				new Consultations(pages[j]);
 			}
 		}
 	}

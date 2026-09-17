@@ -30,6 +30,7 @@ class Law_Agent_Settings {
 			'shared_secret'    => '',
 			'login_url'        => '',
 			'register_url'     => '',
+			'chat_url'         => '',
 			'greeting'         => '',
 			'height'           => 620,
 		);
@@ -85,6 +86,10 @@ class Law_Agent_Settings {
 		// widget to offer both, because a first-time visitor sent to a login
 		// form has to find the register link themselves.
 		$out['register_url']    = esc_url_raw( trim( (string) ( isset( $in['register_url'] ) ? $in['register_url'] : '' ) ) );
+		// Where "open the conversation" on the consultations page leads: the
+		// page that carries the chat widget or its popup. Empty means the
+		// home page.
+		$out['chat_url']        = esc_url_raw( trim( (string) ( isset( $in['chat_url'] ) ? $in['chat_url'] : '' ) ) );
 		$out['shared_secret']   = trim( (string) ( isset( $in['shared_secret'] ) ? $in['shared_secret'] : '' ) );
 		$out['greeting']        = sanitize_textarea_field( (string) ( isset( $in['greeting'] ) ? $in['greeting'] : '' ) );
 		$out['height']          = max( 320, absint( isset( $in['height'] ) ? $in['height'] : 620 ) );
@@ -185,6 +190,13 @@ class Law_Agent_Settings {
 						<td>
 							<input id="la-register" class="regular-text code" type="url" name="<?php echo esc_attr( $option ); ?>[register_url]" value="<?php echo esc_attr( $o['register_url'] ); ?>">
 							<p class="description"><?php esc_html_e( 'Optional. If your sign-up lives on its own page, the widget offers it alongside sign-in. Leave empty to show only the login link.', 'law-agent-chat' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="la-chat"><?php esc_html_e( 'Chat page', 'law-agent-chat' ); ?></label></th>
+						<td>
+							<input id="la-chat" class="regular-text code" type="url" name="<?php echo esc_attr( $option ); ?>[chat_url]" value="<?php echo esc_attr( $o['chat_url'] ); ?>" placeholder="<?php echo esc_attr( home_url( '/' ) ); ?>">
+							<p class="description"><?php esc_html_e( 'Where "open the conversation" on the consultations page sends the client: the page with the chat widget or its popup. Empty means the home page. The consultations page itself is the "استشاراتي" tab in WooCommerce My Account, or the [law_agent_consultations] shortcode on any page.', 'law-agent-chat' ); ?></p>
 						</td>
 					</tr>
 					<tr>

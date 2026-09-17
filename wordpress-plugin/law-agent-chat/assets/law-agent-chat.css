@@ -14,7 +14,8 @@
  * and the sage of the "معلومات قانونية مبسطة" rule.
  */
 
-.law-agent-chat {
+.law-agent-chat,
+.law-agent-account {
 	/* brand */
 	--la-teal:        #134e4a;
 	--la-teal-deep:   #0d3b38;
@@ -40,7 +41,9 @@
 
 	--la-radius:      14px;
 	--la-radius-sm:   10px;
+}
 
+.law-agent-chat {
 	display: grid;
 	grid-template-columns: 1fr;
 	height: var(--law-agent-height, 620px);
@@ -751,4 +754,245 @@
 	border: 1px dashed #c3512f;
 	border-radius: 10px;
 	color: #c3512f;
+}
+
+/* ── the consultations page (My Account) ─────────────────────────────
+   Lives inside the theme's account layout, not in a box of its own: no
+   border, no fixed height, the theme's width. Only the palette is ours. */
+
+.law-agent-account {
+	color: var(--la-ink);
+	font-family: "IBM Plex Sans Arabic", "Noto Naskh Arabic", system-ui, "Segoe UI", Tahoma, sans-serif;
+	font-size: 15px;
+	line-height: 1.75;
+	text-align: right;
+}
+
+.law-agent-account *,
+.law-agent-account *::before,
+.law-agent-account *::after { box-sizing: border-box; }
+
+.law-agent-account .la-account-loading,
+.law-agent-account .la-cmuted { color: var(--la-faint); }
+
+.law-agent-account .la-account-empty {
+	padding: 28px 20px;
+	border: 1px dashed var(--la-rule);
+	border-radius: var(--la-radius);
+	background: var(--la-bg);
+	text-align: center;
+}
+
+.law-agent-account .la-account-empty p { margin: 0 0 14px; }
+
+.law-agent-account .la-error {
+	padding: 12px 14px;
+	border-radius: var(--la-radius-sm);
+	background: var(--la-danger-soft);
+	color: var(--la-danger);
+}
+
+.law-agent-account .la-cta-button {
+	display: inline-block;
+	padding: 10px 20px;
+	border: 0;
+	border-radius: var(--la-radius-sm);
+	background: var(--la-teal);
+	color: var(--la-teal-ink);
+	font: inherit;
+	font-weight: 600;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.law-agent-account .la-cta-button:hover { background: var(--la-teal-deep); color: var(--la-teal-ink); }
+
+/* list */
+
+.law-agent-account .la-clist {
+	display: grid;
+	gap: 14px;
+}
+
+.law-agent-account .la-ccard {
+	padding: 16px 18px;
+	border: 1px solid var(--la-rule);
+	border-inline-start: 4px solid var(--la-sage);
+	border-radius: var(--la-radius);
+	background: var(--la-panel);
+}
+
+.law-agent-account .la-ccard.is-pending  { border-inline-start-color: var(--la-warn); }
+.law-agent-account .la-ccard.is-cancelled,
+.law-agent-account .la-ccard.is-refunded { border-inline-start-color: var(--la-faint); }
+
+.law-agent-account .la-ccard-head,
+.law-agent-account .la-ccard-body,
+.law-agent-account .la-ccard-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.law-agent-account .la-ccard-head { margin-bottom: 6px; }
+.law-agent-account .la-ccard-date { color: var(--la-muted); font-size: 13.5px; }
+.law-agent-account .la-ccard-amount { font-size: 18px; font-weight: 700; color: var(--la-teal); }
+.law-agent-account .la-ccard-lawyer { color: var(--la-muted); font-size: 14px; }
+
+.law-agent-account .la-ccard-actions {
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px solid var(--la-rule);
+	justify-content: flex-start;
+}
+
+.law-agent-account .la-clink {
+	color: var(--la-teal);
+	font-weight: 600;
+	text-decoration: none;
+	border-bottom: 1px solid var(--la-sage-rule);
+}
+
+.law-agent-account .la-clink:hover { border-bottom-color: var(--la-teal); color: var(--la-teal-deep); }
+
+.law-agent-account .la-clink-chat::before {
+	content: "💬";
+	margin-inline-end: 5px;
+	font-size: 13px;
+}
+
+/* status badge, same words as the dashboard */
+
+.law-agent-account .la-cstatus {
+	display: inline-block;
+	padding: 2px 10px;
+	border-radius: 999px;
+	font-size: 12.5px;
+	font-weight: 600;
+	background: var(--la-sage-soft);
+	color: var(--la-teal);
+}
+
+.law-agent-account .la-cstatus.is-pending   { background: var(--la-warn-soft); color: var(--la-warn); }
+.law-agent-account .la-cstatus.is-cancelled,
+.law-agent-account .la-cstatus.is-refunded  { background: var(--la-bg); color: var(--la-muted); }
+
+/* detail */
+
+.law-agent-account .la-cback {
+	display: inline-block;
+	margin-bottom: 14px;
+	color: var(--la-muted);
+	font-size: 14px;
+	text-decoration: none;
+}
+
+.law-agent-account .la-cback::before { content: "→"; margin-inline-end: 6px; }
+.law-agent-account .la-cback:hover { color: var(--la-teal); }
+
+.law-agent-account .la-cdetail-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+	margin-bottom: 14px;
+}
+
+.law-agent-account .la-cdetail-title {
+	margin: 0;
+	font-size: 20px;
+	font-weight: 700;
+	color: var(--la-teal);
+}
+
+.law-agent-account .la-cfacts {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 8px 18px;
+	margin: 0 0 20px;
+	padding: 16px 18px;
+	border: 1px solid var(--la-rule);
+	border-radius: var(--la-radius);
+	background: var(--la-panel);
+}
+
+.law-agent-account .la-cfacts dt { margin: 0; color: var(--la-muted); font-size: 14px; }
+.law-agent-account .la-cfacts dd { margin: 0; font-weight: 600; word-break: break-all; }
+
+.law-agent-account .la-csection { margin-top: 20px; }
+
+.law-agent-account .la-csection h4 {
+	margin: 0 0 10px;
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--la-teal);
+}
+
+.law-agent-account .la-csection-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.law-agent-account .la-csummary {
+	margin: 0;
+	padding: 14px 16px;
+	border-radius: var(--la-radius-sm);
+	background: var(--la-sage-soft);
+	border: 1px solid var(--la-sage-rule);
+	white-space: pre-wrap;
+}
+
+/* the transcript, read-only and compact */
+
+.law-agent-account .la-cthread {
+	display: grid;
+	gap: 10px;
+	padding: 14px;
+	border: 1px solid var(--la-rule);
+	border-radius: var(--la-radius);
+	background: var(--la-bg);
+	max-height: 520px;
+	overflow: auto;
+}
+
+.law-agent-account .la-cmsg {
+	max-width: 88%;
+	padding: 10px 14px;
+	border-radius: var(--la-radius-sm);
+	background: var(--la-panel);
+	border: 1px solid var(--la-rule);
+}
+
+.law-agent-account .la-cmsg.user {
+	justify-self: start;
+	background: var(--la-teal);
+	border-color: var(--la-teal);
+	color: var(--la-teal-ink);
+}
+
+.law-agent-account .la-cmsg-who {
+	display: block;
+	margin-bottom: 2px;
+	font-size: 12px;
+	opacity: .75;
+}
+
+.law-agent-account .la-cmsg.is-voice .la-cmsg-who::before { content: "🎙 "; }
+
+.law-agent-account .la-cmsg-body p { margin: 0 0 6px; }
+.law-agent-account .la-cmsg-body p:last-child { margin-bottom: 0; }
+.law-agent-account .la-cmsg-body table { border-collapse: collapse; font-size: 13.5px; }
+.law-agent-account .la-cmsg-body td,
+.law-agent-account .la-cmsg-body th { padding: 4px 8px; border: 1px solid var(--la-rule); }
+
+@media (max-width: 600px) {
+	.law-agent-account .la-cfacts { grid-template-columns: 1fr; gap: 2px 0; }
+	.law-agent-account .la-cfacts dt { margin-top: 8px; }
+	.law-agent-account .la-cmsg { max-width: 100%; }
 }

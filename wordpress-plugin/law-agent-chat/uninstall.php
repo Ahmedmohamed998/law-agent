@@ -13,3 +13,8 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 
 delete_option( 'law_agent_chat_options' );
 delete_site_option( 'law_agent_chat_options' );
+delete_option( 'law_agent_chat_rewrite' );
+
+// The My Account endpoint goes with the plugin; leaving its rule cached
+// would 404 /my-account/consultations/ instead of falling through.
+flush_rewrite_rules( false );
