@@ -28,6 +28,11 @@ interface CaseMessage {
   input_mode: 'text' | 'voice';
   status: string;
   created_at: string | null;
+  /** A service the assistant proposed under this answer, if any. */
+  suggested_service?: string | null;
+  suggestion_reason?: string | null;
+  suggestion_confidence?: number | null;
+  suggestion_clicked?: boolean;
 }
 
 interface Conversation {
@@ -313,6 +318,14 @@ export default function CaseDetail({
                       )}
                       {m.status !== 'complete' && (
                         <span className="badge badge-danger">{m.status}</span>
+                      )}
+                      {m.suggested_service && (
+                        <span
+                          className={`badge ${m.suggestion_clicked ? 'badge-success' : 'badge-language'}`}
+                          title={`${m.suggestion_reason || ''}${m.suggestion_confidence != null ? ` (${m.suggestion_confidence.toFixed(2)})` : ''}`}
+                        >
+                          Suggested: {m.suggested_service}{m.suggestion_clicked ? ' · clicked' : ''}
+                        </span>
                       )}
                       {m.created_at && <span className="muted">{formatDate(m.created_at)}</span>}
                     </div>
