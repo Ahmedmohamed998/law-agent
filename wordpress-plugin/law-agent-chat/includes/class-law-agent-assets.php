@@ -88,11 +88,10 @@ class Law_Agent_Assets {
 					'restNonce'       => wp_create_nonce( 'wp_rest' ),
 					'loginUrl'        => $o['login_url'] ? $o['login_url'] : wp_login_url(),
 					'registerUrl'     => $o['register_url'],
-					// For the consultations page: where a conversation opens, and
-					// where its list lives (empty without WooCommerce).
+					// For the consultations page: where to go to book, and where
+					// its list lives (empty without WooCommerce).
 					'chatUrl'         => $o['chat_url'] ? $o['chat_url'] : home_url( '/' ),
 					'accountUrl'      => Law_Agent_Account::list_url(),
-					'chatPopupId'     => (int) $o['chat_popup_id'],
 					'voiceEnabled'    => (bool) $o['voice_enabled'],
 					// Must match VOICE_MAX_SECONDS on the AI service, which
 					// refuses longer recordings. The widget stops here so a

@@ -107,9 +107,21 @@ class Law_Agent_Account {
 
 		$id = preg_replace( '/[^A-Za-z0-9_-]/', '', (string) $consultation_id );
 
+		// The detail view carries the chat widget's markup in a <template>:
+		// the JS clones it once it knows which session the consultation is
+		// about, so the client can read and continue that conversation right
+		// here, whatever page or popup the site keeps its chat in.
+		$template = '';
+		if ( '' !== $id ) {
+			$template = '<template data-la-chat-template>'
+				. Law_Agent_Shortcode::render( array( 'sidebar' => 'no', 'height' => 560 ) )
+				. '</template>';
+		}
+
 		return '<div class="law-agent-account" dir="rtl" lang="ar" data-law-agent-consultations'
 			. ( '' !== $id ? ' data-consultation="' . esc_attr( $id ) . '"' : '' )
-			. '><div class="la-account-loading">' . esc_html__( 'جارٍ التحميل…', 'law-agent-chat' ) . '</div></div>';
+			. '><div class="la-account-loading">' . esc_html__( 'جارٍ التحميل…', 'law-agent-chat' ) . '</div>'
+			. $template . '</div>';
 	}
 
 	/** Base URL for the list, so a detail view can link back to it. */

@@ -127,9 +127,6 @@
 
 	var AUTH_KEY = 'lawAgent.auth.v1';
 	var SESSION_KEY = 'lawAgent.session.v1';
-	// Set by "open the conversation" on the consultations page, consumed
-	// by the next page load: open the chat popup without a click.
-	var OPEN_KEY = 'lawAgent.openChat.v1';
 
 	/* ── storage ──────────────────────────────────────────────────────────
 	 * Wrapped because a private window, or a browser set to block site data,
@@ -781,6 +778,10 @@
 				// token for a signed-in one: a visitor back from logging in
 				// must see their new allowance, not the exhausted old one.
 				self.refreshUsage();
+				// A container that names its session (the consultations page)
+				// opens that one and makes it current.
+				var preset = self.root.getAttribute('data-session');
+				if (preset) write(SESSION_KEY, { id: preset });
 				var stored = read(SESSION_KEY);
 				if (stored && stored.id) {
 					return self.open(stored.id).catch(function () {
@@ -1593,6 +1594,9 @@
 	function Consultations(root) {
 		this.root = root;
 		this.id = root.getAttribute('data-consultation') || '';
+		// The widget markup PHP shipped for the detail view; taken before the
+		// container is cleared for rendering.
+		this.template = root.querySelector('template[data-la-chat-template]');
 		this.root.innerHTML = '';
 		this.load();
 	}
@@ -1675,7 +1679,7 @@
 		details.href = this.detailUrl(c.consultation_id);
 		actions.appendChild(details);
 		if (c.ai_session_id) {
-			actions.appendChild(this.openChatLink(c.ai_session_id));
+			actions.appendChild(this.openChatLink(c.consultation_id));
 		}
 		card.appendChild(actions);
 
@@ -1712,15 +1716,31 @@
 		}
 
 		var tx = el('section', 'la-csection');
-		var txHead = el('div', 'la-csection-head');
-		txHead.appendChild(el('h4', '', T.cTranscript));
-		if (c.ai_session_id) txHead.appendChild(this.openChatLink(c.ai_session_id));
-		tx.appendChild(txHead);
+		tx.id = 'la-chat';
+		tx.appendChild(el('h4', '', T.cTranscript));
 		this.root.appendChild(tx);
 
 		if (!c.ai_session_id) {
 			tx.appendChild(el('p', 'la-cmuted', T.cNoSession));
 			return;
+		}
+
+		// The live widget, on this conversation. PHP ships its markup in a
+		// <template> because the session id is only known here, after the
+		// consultation has loaded. boot() mounts it.
+		var tpl = this.template;
+		if (tpl && tpl.content) {
+			var box = tpl.content.firstElementChild;
+			if (box) {
+				var widget = box.cloneNode(true);
+				widget.setAttribute('data-session', c.ai_session_id);
+				tx.appendChild(widget);
+				boot();
+				if (window.location.hash === '#la-chat') {
+					tx.scrollIntoView({ block: 'start' });
+				}
+				return;
+			}
 		}
 
 		var thread = el('div', 'la-cthread');
@@ -1776,55 +1796,15 @@
 	};
 
 	/**
-	 * The widget opens whatever session is stored, so selecting one here and
-	 * going to the chat page lands them on this exact conversation.
+	 * The conversation opens on the detail page itself, as the live widget,
+	 * so this never depends on where (or in what popup) the site keeps its
+	 * chat.
 	 */
-	Consultations.prototype.openChatLink = function (sessionId) {
+	Consultations.prototype.openChatLink = function (consultationId) {
 		var a = el('a', 'la-clink la-clink-chat', T.cOpenChat);
-		a.href = CFG.chatUrl || '/';
-		a.addEventListener('click', function () {
-			write(SESSION_KEY, { id: sessionId });
-			write(OPEN_KEY, { at: Date.now() });
-		});
+		a.href = this.detailUrl(consultationId) + '#la-chat';
 		return a;
 	};
-
-	/**
-	 * The chat on this site is an Elementor popup, which only opens on a
-	 * click. A client sent here from their consultations page would land on
-	 * the home page with the right conversation loaded inside a popup they
-	 * cannot see. So when the flag is set, open it for them.
-	 *
-	 * By popup id when configured; otherwise by pressing whatever link on
-	 * the page opens a popup, which on a page whose only popup is the chat
-	 * is the "ask the assistant" button. Elementor initialises after this
-	 * file, so poll for it briefly rather than assume.
-	 */
-	function openChatPopup() {
-		var flag = read(OPEN_KEY);
-		if (!flag) return;
-		write(OPEN_KEY, null);
-		// A flag older than a minute is a stale leftover, not an intent.
-		if (!flag.at || Date.now() - flag.at > 60000) return;
-
-		var tries = 0;
-		function attempt() {
-			tries += 1;
-			var pro = window.elementorProFrontend;
-			var popups = pro && pro.modules && pro.modules.popup;
-			if (CFG.chatPopupId && popups && typeof popups.showPopup === 'function') {
-				popups.showPopup({ id: Number(CFG.chatPopupId) });
-				return;
-			}
-			var trigger = document.querySelector('a[href*="elementor-action"][href*="popup:open"]');
-			if (trigger && popups) {
-				trigger.click();
-				return;
-			}
-			if (tries < 40) window.setTimeout(attempt, 150);
-		}
-		attempt();
-	}
 
 	function fmtDate(iso) {
 		if (!iso) return '';
@@ -1898,7 +1878,6 @@
 	function start() {
 		boot();
 		watch();
-		openChatPopup();
 	}
 
 	if (document.readyState === 'loading') {

@@ -31,7 +31,6 @@ class Law_Agent_Settings {
 			'login_url'        => '',
 			'register_url'     => '',
 			'chat_url'         => '',
-			'chat_popup_id'    => 0,
 			'greeting'         => '',
 			'height'           => 620,
 		);
@@ -87,13 +86,10 @@ class Law_Agent_Settings {
 		// widget to offer both, because a first-time visitor sent to a login
 		// form has to find the register link themselves.
 		$out['register_url']    = esc_url_raw( trim( (string) ( isset( $in['register_url'] ) ? $in['register_url'] : '' ) ) );
-		// Where "open the conversation" on the consultations page leads: the
+		// Where the consultations page sends a client who has none yet: the
 		// page that carries the chat widget or its popup. Empty means the
 		// home page.
 		$out['chat_url']        = esc_url_raw( trim( (string) ( isset( $in['chat_url'] ) ? $in['chat_url'] : '' ) ) );
-		// The Elementor popup that holds the chat, so "open the conversation"
-		// can open it on arrival. 0 means: press the page's popup trigger.
-		$out['chat_popup_id']   = absint( isset( $in['chat_popup_id'] ) ? $in['chat_popup_id'] : 0 );
 		$out['shared_secret']   = trim( (string) ( isset( $in['shared_secret'] ) ? $in['shared_secret'] : '' ) );
 		$out['greeting']        = sanitize_textarea_field( (string) ( isset( $in['greeting'] ) ? $in['greeting'] : '' ) );
 		$out['height']          = max( 320, absint( isset( $in['height'] ) ? $in['height'] : 620 ) );
@@ -200,14 +196,7 @@ class Law_Agent_Settings {
 						<th scope="row"><label for="la-chat"><?php esc_html_e( 'Chat page', 'law-agent-chat' ); ?></label></th>
 						<td>
 							<input id="la-chat" class="regular-text code" type="url" name="<?php echo esc_attr( $option ); ?>[chat_url]" value="<?php echo esc_attr( $o['chat_url'] ); ?>" placeholder="<?php echo esc_attr( home_url( '/' ) ); ?>">
-							<p class="description"><?php esc_html_e( 'Where "open the conversation" on the consultations page sends the client: the page with the chat widget or its popup. Empty means the home page. The consultations page itself is the "استشاراتي" tab in WooCommerce My Account, or the [law_agent_consultations] shortcode on any page.', 'law-agent-chat' ); ?></p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="la-popup"><?php esc_html_e( 'Chat popup ID', 'law-agent-chat' ); ?></label></th>
-						<td>
-							<input id="la-popup" class="small-text" type="number" min="0" name="<?php echo esc_attr( $option ); ?>[chat_popup_id]" value="<?php echo esc_attr( $o['chat_popup_id'] ); ?>">
-							<p class="description"><?php esc_html_e( 'If the chat lives in an Elementor popup, its ID (Templates → Popups: the number in the edit link). "Open the conversation" then opens that popup on arrival. Leave 0 and the widget presses the first popup button it finds on the chat page instead.', 'law-agent-chat' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Where the consultations page sends a client who has not booked yet ("حجز استشارة"): the page with the chat widget or its popup. Empty means the home page. The consultations page itself is the "استشاراتي" tab in WooCommerce My Account, or the [law_agent_consultations] shortcode on any page; each consultation opens its own conversation right there.', 'law-agent-chat' ); ?></p>
 						</td>
 					</tr>
 					<tr>
