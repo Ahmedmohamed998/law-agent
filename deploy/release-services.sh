@@ -63,12 +63,19 @@ docker compose exec -T -e PGPASSWORD="$PGPW" db psql -U postgres -d law_agent -t
   "SELECT 'messages.suggested_service: ' || CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='ai' AND table_name='messages' AND column_name='suggested_service') THEN 'ok' ELSE 'MISSING' END" < /dev/null
 
 echo "== 7/8 dashboard build + restart"
-if [ -f dashboard/package.json ]; then
+# The dashboard is static files. Built here when Node exists; otherwise
+# dashboard/dist must already be in place (built with VITE_BACKEND_URL=$BE
+# and shipped with the code), which is how earlier releases did it.
+if command -v npm > /dev/null 2>&1 && [ -f dashboard/package.json ]; then
   ( cd dashboard && npm ci --silent && VITE_BACKEND_URL="$BE" npx vite build > /tmp/law-agent-dashboard.log 2>&1 ) \
     || { tail -20 /tmp/law-agent-dashboard.log; exit 1; }
-  chmod -R a+rX dashboard/dist
-  echo "    dashboard built"
+  echo "    dashboard built here"
+elif [ -f dashboard/dist/index.html ] && grep -q "Services" dashboard/dist/assets/*.js 2>/dev/null; then
+  echo "    dashboard: prebuilt dist in place"
+else
+  echo "    dashboard: dist is missing or old -- build locally with VITE_BACKEND_URL=$BE and copy dashboard/dist here"; exit 1
 fi
+chmod -R a+rX dashboard/dist
 docker compose up -d backend ai 2>&1 | tail -2
 printf "    waiting for the AI service index"
 for i in $(seq 1 60); do
